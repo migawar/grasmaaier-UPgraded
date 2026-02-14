@@ -10,30 +10,30 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// 3. DE MAAIER (Rode kubus: 0.75 breed, 0.75 hoog, 1 lang)
+// 3. DE MAAIER (Rode kubus: 0.75 x 0.75 x 1)
 const mowerGeo = new THREE.BoxGeometry(0.75, 0.75, 1);
 const mowerMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
 const mower = new THREE.Mesh(mowerGeo, mowerMat);
-mower.position.y = 0.375; // Precies op de grond
+mower.position.y = 0.375;
 scene.add(mower);
 
-// 4. HET GRAS (Oneindig effect)
-const grassGroup = new THREE.Group();
-const grassGeo = new THREE.SphereGeometry(0.125, 6, 6); // Diameter 0.25m
+// 4. HET GRASVELD (Vast veld om te kunnen maaien)
+const grassArray = [];
+const grassGeo = new THREE.SphereGeometry(0.125, 6, 6); // Diameter 0.25
 const grassMat = new THREE.MeshStandardMaterial({ color: 0x228b22 });
 
-const spacing = 0.1; // De gevraagde marge
-const step = 0.25 + spacing; // Totale afstand tussen bollen: 0.35m
-const range = 12; // Hoe ver het grasveld rondom de maaier getekend wordt
+const spacing = 0.1; 
+const step = 0.25 + spacing; // 0.35m
+const fieldSize = 10; // Grootte van het veld (20x20 meter)
 
-for (let x = -range; x <= range; x += step) {
-    for (let z = -range; z <= range; z += step) {
+for (let x = -fieldSize; x <= fieldSize; x += step) {
+    for (let z = -fieldSize; z <= fieldSize; z += step) {
         const grass = new THREE.Mesh(grassGeo, grassMat);
         grass.position.set(x, 0.125, z);
-        grassGroup.add(grass);
+        scene.add(grass);
+        grassArray.push(grass); // Sla op in een lijst om te kunnen controleren
     }
 }
-scene.add(grassGroup);
 
 // 5. LICHT
 const light = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -46,33 +46,55 @@ const keys = {};
 window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
 
-// 7. ANIMATIE LOOP
+// 7. MAAI LOGICA
+const mowerRadius = 1.0; // De straal van 1 gmet
+const grassRadius = 0.125; // De straal van de bol zelf
+
+function checkMowing() {
+    for (let i = 0; i < grassArray.length; i++) {
+        const grass = grassArray[i];
+        
+        // Alleen controleren als de bol nog zichtbaar is
+        if (grass.visible) {
+            // Bereken afstand tussen middelpunt maaier en middelpunt grasbol
+            const dx = mower.position.x - grass.position.x;
+            const dz = mower.position.z - grass.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+
+            // "Alleen als ze er volledig in zitten": 
+            // De verste rand van de bol (afstand + straal_bol) moet binnen de maaier-straal vallen
+            if (distance + grassRadius <= mowerRadius) {
+                grass.visible = false;
+            }
+        }
+    }
+}
+
+// 8. ANIMATIE LOOP
 const speed = 0.12;
 
 function animate() {
     requestAnimationFrame(animate);
 
-    // Beweging van de maaier
+    // Beweging
     if (keys['z']) mower.position.z -= speed;
     if (keys['s']) mower.position.z += speed;
     if (keys['q']) mower.position.x -= speed;
     if (keys['d']) mower.position.x += speed;
 
-    // INFINITE GRASS LOGIC
-    // Het grasveld 'snapt' naar het grid terwijl het de maaier volgt
-    grassGroup.position.x = Math.floor(mower.position.x / step) * step;
-    grassGroup.position.z = Math.floor(mower.position.z / step) * step;
+    // Maai actie uitvoeren
+    checkMowing();
 
-    // CAMERA VOLGT DE MAAIER
+    // Camera volgt
     camera.position.x = mower.position.x;
-    camera.position.y = mower.position.y + 4; // 4m hoog
-    camera.position.z = mower.position.z + 6; // 6m erachter
+    camera.position.y = mower.position.y + 4;
+    camera.position.z = mower.position.z + 6;
     camera.lookAt(mower.position);
 
     renderer.render(scene, camera);
 }
 
-// Window Resize
+// Resize
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
