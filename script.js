@@ -18,30 +18,41 @@ const mower = new THREE.Mesh(geometry, material);
 mower.position.y = 0.375; 
 scene.add(mower);
 
-// --- NIEUW: HET GRAS ---
-// Afmetingen bol: 0.25 x 0.25 x 0.25
-const grassGeo = new THREE.SphereGeometry(0.125, 8, 8); // Straal is helft van de breedte
-const grassMat = new THREE.MeshStandardMaterial({ color: 0x228b22 }); // Bosgroen
+// --- GEOPTIMALISEERD GRAS (InstancedMesh) ---
+const grassSize = 0.25; 
+const spacing = 0.1; // Jouw gevraagde tussenruimte
+const range = 10; // Hoe ver het grasveld uitstrekt vanaf het midden (totaal 20m x 20m)
 
-// We vullen een gebied van 10x10 meter met graspolletjes om de 0.25 meter
-for (let x = -5; x < 5; x += 0.25) {
-    for (let z = -5; z < 5; z += 0.25) {
-        const grass = new THREE.Mesh(grassGeo, grassMat);
-        grass.position.set(x, 0.125, z); // 0.125 hoog zodat ze OP het grid staan
-        scene.add(grass);
+// Aantal bollen berekenen
+const countPerSide = Math.floor((range * 2) / (grassSize + spacing));
+const totalGrassCount = countPerSide * countPerSide;
+
+const grassGeo = new THREE.SphereGeometry(grassSize / 2, 6, 6); // Low-poly voor snelheid
+const grassMat = new THREE.MeshStandardMaterial({ color: 0x228b22 });
+const instancedGrass = new THREE.THREE.InstancedMesh(grassGeo, grassMat, totalGrassCount);
+
+let i = 0;
+const dummy = new THREE.Object3D();
+
+for (let x = -range; x < range; x += grassSize + spacing) {
+    for (let z = -range; z < range; z += grassSize + spacing) {
+        dummy.position.set(x, grassSize / 2, z);
+        dummy.updateMatrix();
+        instancedGrass.setMatrixAt(i++, dummy.matrix);
     }
 }
-// -----------------------
+scene.add(instancedGrass);
+// --------------------------------------------
 
 // 4. Licht
 const ambientLight = new THREE.AmbientLight(0xffffff, 1);
 scene.add(ambientLight);
 
-const pointLight = new THREE.PointLight(0xffffff, 15);
-pointLight.position.set(5, 5, 5);
+const pointLight = new THREE.PointLight(0xffffff, 20);
+pointLight.position.set(5, 10, 5);
 scene.add(pointLight);
 
-// 5. Grid (Helpt om de beweging te zien)
+// 5. GridHelper (voor diepte-indicatie buiten het grasveld)
 const gridHelper = new THREE.GridHelper(100, 100, 0x00ff00, 0x444444);
 scene.add(gridHelper);
 
@@ -56,7 +67,6 @@ const speed = 0.1;
 function animate() {
     requestAnimationFrame(animate);
 
-    // Beweging
     if (keys['z']) mower.position.z -= speed;
     if (keys['s']) mower.position.z += speed;
     if (keys['q']) mower.position.x -= speed;
@@ -66,7 +76,6 @@ function animate() {
     camera.position.x = mower.position.x;
     camera.position.y = mower.position.y + 3; 
     camera.position.z = mower.position.z + 5; 
-    
     camera.lookAt(mower.position);
 
     renderer.render(scene, camera);
