@@ -55,7 +55,7 @@ function maakKnop(tekst, actie) {
     btn.style.cursor = 'pointer';
     btn.style.borderRadius = '5px';
     btn.style.fontWeight = 'bold';
-    btn.innerText = tekst;
+    btn.style.textAlign = 'left';
     btn.onclick = actie;
     menu.appendChild(btn);
     return btn;
@@ -64,7 +64,7 @@ function maakKnop(tekst, actie) {
 const btnRadius = maakKnop('', () => {
     if (geld >= prijsRadius) {
         geld -= prijsRadius;
-        huidigMowerRadius += 0.1;
+        huidigMowerRadius += 0.45; // VERGROOT MET 0.45 GMET
         prijsRadius *= 1.5;
         updateUI();
     }
@@ -73,7 +73,7 @@ const btnRadius = maakKnop('', () => {
 const btnSpeed = maakKnop('', () => {
     if (geld >= prijsSnelheid) {
         geld -= prijsSnelheid;
-        huidigeSnelheid += 0.02; // Komt overeen met ongeveer +1 km/u in verhouding
+        huidigeSnelheid += 0.03; 
         prijsSnelheid *= 1.5;
         updateUI();
     }
@@ -82,7 +82,7 @@ const btnSpeed = maakKnop('', () => {
 const btnWaarde = maakKnop('', () => {
     if (geld >= prijsWaarde) {
         geld -= prijsWaarde;
-        grasWaarde += 0.01;
+        grasWaarde += 0.10; // WAARDE STIJGT MET $0.10
         prijsWaarde *= 1.5;
         updateUI();
     }
@@ -90,9 +90,9 @@ const btnWaarde = maakKnop('', () => {
 
 function updateUI() {
     geldDisplay.innerText = '$ ' + geld.toFixed(2);
-    btnRadius.innerText = `Groter Bereik ($${prijsRadius.toFixed(2)})\nStraal: ${huidigMowerRadius.toFixed(1)}m`;
-    btnSpeed.innerText = `Sneller ($${prijsSnelheid.toFixed(2)})\nSnelheid: +1 km/u`;
-    btnWaarde.innerText = `Meer Waarde ($${prijsWaarde.toFixed(2)})\nPer bol: $${grasWaarde.toFixed(2)}`;
+    btnRadius.innerText = `GROTER BEREIK ($${prijsRadius.toFixed(2)})\nStraal: ${huidigMowerRadius.toFixed(2)}m (+0.45)`;
+    btnSpeed.innerText = `SNELLER ($${prijsSnelheid.toFixed(2)})\nSnelheid: +1 km/u`;
+    btnWaarde.innerText = `MEER WAARDE ($${prijsWaarde.toFixed(2)})\nPer bol: $${grasWaarde.toFixed(2)} (+$0.10)`;
 }
 updateUI();
 
@@ -104,13 +104,13 @@ const mower = new THREE.Mesh(
 mower.position.y = 0.375;
 scene.add(mower);
 
-// 4. HET GRASVELD
+// 4. HET GRASVELD (15x15m veld)
 const grassArray = [];
-const grassGeo = new THREE.SphereGeometry(0.125, 4, 4); // Iets minder detail voor performance
+const grassGeo = new THREE.SphereGeometry(0.125, 4, 4); 
 const grassMat = new THREE.MeshStandardMaterial({ color: 0x228b22 });
 
 const step = 0.35; 
-const fieldSize = 10; // Iets groter veld zoals gevraagd (15-20m)
+const fieldSize = 7.5; 
 
 for (let x = -fieldSize; x <= fieldSize; x += step) {
     for (let z = -fieldSize; z <= fieldSize; z += step) {
@@ -135,7 +135,7 @@ window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
 
 // 7. LOGICA
 const grassRadius = 0.125;
-const regrowDelay = 1000; 
+const regrowDelay = 1000; // NU 1000 MILISECONDEN (1 SECONDE)
 
 function processGrass() {
     const currentTime = Date.now();
@@ -169,7 +169,7 @@ function animate() {
 
     processGrass();
 
-    camera.position.set(mower.position.x, mower.position.y + 5, mower.position.z + 7);
+    camera.position.set(mower.position.x, mower.position.y + 6, mower.position.z + 8);
     camera.lookAt(mower.position);
 
     renderer.render(scene, camera);
