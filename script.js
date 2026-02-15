@@ -135,7 +135,7 @@ window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
 
 // 7. LOGICA
 const grassRadius = 0.125;
-const regrowDelay = 3000; 
+const regrowDelay = 1000; 
 
 function processGrass() {
     const currentTime = Date.now();
