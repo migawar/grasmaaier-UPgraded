@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-// --- ENGINE ---
+// --- ENGINE SETUP ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x050505);
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -15,7 +15,7 @@ let grasWaarde = 0.01, huidigeSnelheid = 0.15, huidigMowerRadius = 1.3;
 let prijsRadius = 5, prijsSnelheid = 5, prijsWaarde = 10;
 let actieveOpdracht = null;
 
-// --- GRASSPASS & REWARDS LOGICA ---
+// --- LOGICA ---
 function genereerMissie() {
     if (huidigLevel <= 24) {
         const types = [{id:'m',d:5000,t:"Maai 5000 grassprieten"}, {id:'u',d:5,t:"Koop 5 upgrades"}, {id:'v',d:500,t:"Verdien $500"}, {id:'s',d:50,t:"Spendeer $50 aan snelheid"}];
@@ -51,17 +51,24 @@ const trofeeBox = document.createElement('div');
 trofeeBox.style.cssText = 'position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:15px 25px; border-radius:10px; border:3px solid #f1c40f; color:#f1c40f; font-size:32px; pointer-events:auto;';
 ui.appendChild(trofeeBox);
 
-// UPGRADES (ONDER HET GELD)
+// UPGRADES (LINKS IN HET MIDDEN)
 const upgradeBox = document.createElement('div');
-upgradeBox.style.cssText = 'position:absolute; top:110px; left:20px; display:flex; flex-direction:column; gap:10px; pointer-events:auto;';
+upgradeBox.style.cssText = 'position:absolute; top:50%; left:20px; transform:translateY(-50%); display:flex; flex-direction:column; gap:15px; pointer-events:auto;';
 ui.appendChild(upgradeBox);
 
-// CHEAT-KNOP (RECHTSONDER)
-const cheatBtn = document.createElement('button');
-cheatBtn.innerText = "ADD $10.000 (CHEAT)";
-cheatBtn.style.cssText = 'position:absolute; bottom:20px; right:20px; background:#e74c3c; color:white; border:none; padding:10px; cursor:pointer; pointer-events:auto; opacity:0.5;';
-cheatBtn.onclick = () => { geld += 10000; totaalVerdiend += 10000; updateUI(); };
-ui.appendChild(cheatBtn);
+// CHEAT REDEEM KNOP (RECHTSONDER)
+const cheatRedeemBtn = document.createElement('button');
+cheatRedeemBtn.innerText = "🔑 REDEEM CODE";
+cheatRedeemBtn.style.cssText = 'position:absolute; bottom:20px; right:20px; background:#e74c3c; color:white; border:none; padding:15px; border-radius:10px; cursor:pointer; pointer-events:auto; font-weight:bold;';
+cheatRedeemBtn.onclick = () => {
+    const code = prompt("Voer geheime cheatcode in:");
+    if(code === "OG-kervelsoeps") { geld += 50000; totaalVerdiend += 50000; alert("Code aanvaard! +$50.000"); }
+    else if(code === "!wannaBEop") { geld += 100000; totaalVerdiend += 100000; alert("Code aanvaard! +$100.000"); }
+    else if(code === "YEAHman") { geld += 250000; totaalVerdiend += 250000; alert("Code aanvaard! +$250.000"); }
+    else { alert("Foutieve code!"); }
+    updateUI();
+};
+ui.appendChild(cheatRedeemBtn);
 
 // GRASSPASS KNOP (LINKSONDER)
 const gpBtn = document.createElement('button');
@@ -78,9 +85,9 @@ function updateUI() {
     trofeeBox.innerText = `🏆 ${trofeeën}`;
     
     upgradeBox.innerHTML = `
-        <button onclick="koop('r')" style="width:200px; padding:12px; background:#27ae60; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">RADIUS: $${prijsRadius.toFixed(0)}</button>
-        <button onclick="koop('s')" style="width:200px; padding:12px; background:#27ae60; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">SPEED: $${prijsSnelheid.toFixed(0)}</button>
-        <button onclick="koop('w')" style="width:200px; padding:12px; background:#27ae60; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">VALUE: $${prijsWaarde.toFixed(0)}</button>
+        <button onclick="koop('r')" style="width:220px; padding:15px; background:#27ae60; color:white; border:3px solid #1e8449; border-radius:8px; font-weight:bold; cursor:pointer; font-size:18px;">RADIUS: $${prijsRadius.toFixed(0)}</button>
+        <button onclick="koop('s')" style="width:220px; padding:15px; background:#27ae60; color:white; border:3px solid #1e8449; border-radius:8px; font-weight:bold; cursor:pointer; font-size:18px;">SPEED: $${prijsSnelheid.toFixed(0)}</button>
+        <button onclick="koop('w')" style="width:220px; padding:15px; background:#27ae60; color:white; border:3px solid #1e8449; border-radius:8px; font-weight:bold; cursor:pointer; font-size:18px;">VALUE: $${prijsWaarde.toFixed(0)}</button>
     `;
 
     if (totaalVerdiend >= (trofeeën + 1) * 100000) {
@@ -109,21 +116,20 @@ gpBtn.onclick = () => {
     const p = Math.min(Math.floor((v / actieveOpdracht.d) * 100), 100);
     overlay.innerHTML = `
         <div style="background: linear-gradient(135deg, #2c3e50, #000); padding:50px; border:5px solid #f1c40f; border-radius:30px; text-align:center; width:500px; box-shadow: 0 0 50px #f1c40f;">
-            <h1 style="color:#f1c40f; font-size:48px; margin:0;">GRASS PASS</h1>
-            <h2 style="color:white;">LEVEL ${huidigLevel}</h2>
-            <p style="font-size:20px;">${actieveOpdracht.t}</p>
-            
-            <div style="width:100%; height:40px; background:#444; border-radius:20px; margin:20px 0; border:2px solid white; overflow:hidden;">
-                <div style="width:${p}%; height:100%; background:linear-gradient(90deg, #f1c40f, #f39c12); transition:0.5s;"></div>
+            <h1 style="color:#f1c40f; font-size:52px; margin:0; text-shadow: 3px 3px black;">GRASS PASS</h1>
+            <h2 style="color:white; margin:10px 0;">LEVEL ${huidigLevel}</h2>
+            <p style="font-size:22px; color:#ddd;">${actieveOpdracht.t}</p>
+            <div style="width:100%; height:45px; background:#333; border-radius:25px; margin:25px 0; border:3px solid white; overflow:hidden; position:relative;">
+                <div style="width:${p}%; height:100%; background:linear-gradient(90deg, #f1c40f, #f39c12); transition:0.8s ease-out;"></div>
+                <div style="position:absolute; width:100%; top:8px; left:0; font-weight:bold; color:white; text-shadow: 1px 1px 2px black;">${p}%</div>
             </div>
-            
-            <p style="font-size:24px;">${v.toLocaleString()} / ${actieveOpdracht.d.toLocaleString()} (${p}%)</p>
-            <p style="color:#2ecc71; font-size:24px;">BELONING: ${actieveOpdracht.beloning.txt}</p>
-            <button onclick="this.parentElement.parentElement.style.left='-100%'" style="margin-top:20px; padding:15px 40px; background:white; color:black; border:none; border-radius:10px; font-weight:bold; cursor:pointer;">BACK TO GAME</button>
+            <p style="font-size:24px;">${v.toLocaleString()} / ${actieveOpdracht.d.toLocaleString()}</p>
+            <p style="color:#2ecc71; font-size:26px; font-weight:bold;">REWARD: ${actieveOpdracht.beloning.txt}</p>
+            <button onclick="this.parentElement.parentElement.style.left='-100%'" style="margin-top:20px; padding:15px 45px; background:white; color:black; border:none; border-radius:12px; font-size:20px; font-weight:bold; cursor:pointer;">CLOSE</button>
         </div>`;
 };
 
-// --- WORLD ---
+// --- 3D WORLD ---
 const mower = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 1.2), new THREE.MeshStandardMaterial({color: 0xff0000}));
 scene.add(mower);
 scene.add(new THREE.AmbientLight(0xffffff, 0.9));
