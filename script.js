@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'https://unpkg.com/three@0.164.1/build/three.module.js';
 
 // --- 1. ENGINE SETUP ---
 const scene = new THREE.Scene();
@@ -255,6 +255,12 @@ scene.add(mower, new THREE.AmbientLight(0xffffff, 0.9));
 const light = new THREE.DirectionalLight(0xffffff, 1); light.position.set(5, 15, 5); scene.add(light);
 camera.position.set(0, 15, 15);
 
+// Grondvlak om een zwarte leegte te voorkomen
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x1a2a1a }));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.251; // Net onder de maaier om visuele glitches te voorkomen
+scene.add(ground);
+
 const grassArr = [];
 for(let x=-25; x<25; x+=0.8) { 
     for(let z=-25; z<25; z+=0.8) { 
@@ -272,10 +278,19 @@ function animate() {
     if(keys['w']||keys['z']) mower.position.z -= s; if(keys['s']) mower.position.z += s;
     if(keys['a']||keys['q']) mower.position.x -= s; if(keys['d']) mower.position.x += s;
     grassArr.forEach(g => { 
+        if(gameMode === "creative") {
+            if(g.position.x < mower.position.x - 25) { g.position.x += 50; g.visible = true; }
+            if(g.position.x > mower.position.x + 25) { g.position.x -= 50; g.visible = true; }
+            if(g.position.z < mower.position.z - 25) { g.position.z += 50; g.visible = true; }
+            if(g.position.z > mower.position.z + 25) { g.position.z -= 50; g.visible = true; }
+        }
+
         if(g.visible && mower.position.distanceTo(g.position) < huidigMowerRadius) { 
             g.visible = false; g.userData.cut = Date.now(); 
-            if(gameMode === "classic") { geld += grasWaarde; totaalVerdiend += grasWaarde; } 
-            totaalGemaaid++; window.updateUI(); 
+            if(gameMode === "classic") { 
+                geld += grasWaarde; totaalVerdiend += grasWaarde; 
+                totaalGemaaid++; window.updateUI(); 
+            }
         } 
         if(!g.visible && Date.now() - g.userData.cut > regrowDelay) g.visible = true; 
     });
