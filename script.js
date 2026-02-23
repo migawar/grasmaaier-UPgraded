@@ -13,10 +13,8 @@ let geld = 0, totaalVerdiend = 0, totaalGemaaid = 0, totaalUpgrades = 0;
 let trofeeën = 0, geclaimdeTrofeeën = 0; 
 let grasWaarde = 0.01, huidigeSnelheid = 0.15, huidigMowerRadius = 1.3;
 let prijsRadius = 5, prijsSnelheid = 5, prijsWaarde = 10;
-
 let countRadius = 0, countSnelheid = 0, countWaarde = 0;
 const MAX_RADIUS = 50, MAX_OTHER = 200; 
-
 let regrowDelay = 8000, gameMode = "classic", creativeSpeed = 0.5, autoSaveOnd = false;
 
 const maanden = ["JANUARI", "FEBRUARI", "MAART", "APRIL", "MEI", "JUNI", "JULI", "AUGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DECEMBER"];
@@ -79,6 +77,7 @@ ui.innerHTML = `
         <button onclick="window.openCheat()" style="background:#e74c3c; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">🔑 REDEEM CODE</button>
         <button id="eventBtn" onclick="window.openEvent()" style="background:#9b59b6; color:white; border:5px solid white; padding:20px 45px; border-radius:20px; font-size:24px; cursor:pointer; font-family:Impact;">📅 EVENT</button>
     </div>
+    <div id="saveToast" style="position:absolute; bottom:10px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,0.5); font-size:12px; opacity:0; transition:0.5s;">GAME OPGESLAGEN...</div>
 `;
 
 window.sluit = () => { overlay.style.left = '-100%'; overlay.style.pointerEvents = 'none'; };
@@ -103,20 +102,6 @@ window.updateUI = () => {
 
     document.getElementById('gpBtn').style.border = rewardKlaar ? '8px solid #2ecc71' : '5px solid white';
     document.getElementById('eventBtn').style.background = eventRewardKlaar ? '#2ecc71' : '#9b59b6';
-};
-
-window.koop = (t) => {
-    if (gameMode === "creative") return;
-    if (t==='r' && countRadius < MAX_RADIUS && geld >= prijsRadius) { 
-        geld -= prijsRadius; huidigMowerRadius += 0.3; prijsRadius *= 1.6; countRadius++; totaalUpgrades++; 
-    }
-    if (t==='s' && countSnelheid < MAX_OTHER && geld >= prijsSnelheid) { 
-        geld -= prijsSnelheid; huidigeSnelheid += 0.02; prijsSnelheid *= 1.6; countSnelheid++; totaalUpgrades++; 
-    }
-    if (t==='w' && countWaarde < MAX_OTHER && geld >= prijsWaarde) { 
-        geld -= prijsWaarde; grasWaarde += 0.01; prijsWaarde *= 1.7; countWaarde++; totaalUpgrades++; 
-    }
-    window.updateUI();
 };
 
 // --- 5. OVERIGE FUNCTIES ---
@@ -180,65 +165,87 @@ window.openEvent = () => {
 };
 window.claimEvent = () => { if(eventRewardKlaar) { if(!ontgrendeldeSkins.includes(huidigeMaandNaam)) ontgrendeldeSkins.push(huidigeMaandNaam); eventLevel++; window.genereerMissie(true); window.sluit(); window.updateUI(); } };
 
-// --- 6. SETTINGS & CHEATS ---
-window.toggleAutoSave = () => { autoSaveOnd = !autoSaveOnd; if(autoSaveOnd) window.save(); window.openSettings(); };
+// --- 6. SETTINGS & SAVE/LOAD LOGICA ---
+window.toggleAutoSave = () => { 
+    autoSaveOnd = !autoSaveOnd; 
+    if(autoSaveOnd) window.save(true); 
+    window.openSettings(); 
+};
 
-// NIEUWE FUNCTIE: RESET GAME
-window.resetGame = () => {
-    if(confirm("WEET JE HET ZEKER? Je verliest al je geld, upgrades, trofeeën en skins! Dit kan niet ongedaan worden gemaakt.")) {
-        localStorage.removeItem('grassMasterSaveV2');
-        location.reload(); // Herlaad de pagina om alles te resetten
+window.save = (silent = false) => { 
+    if(!autoSaveOnd && !silent) return;
+    const data = { 
+        geld, totaalVerdiend, totaalGemaaid, totaalUpgrades, geclaimdeTrofeeën, 
+        grasWaarde, huidigeSnelheid, huidigMowerRadius, prijsRadius, prijsSnelheid, 
+        prijsWaarde, countRadius, countSnelheid, countWaarde, gpLevel, eventLevel, 
+        huidigeSkin, ontgrendeldeSkins, autoSaveOnd, gameMode,
+        actieveOpdracht, eventOpdracht, rewardKlaar, eventRewardKlaar
+    };
+    localStorage.setItem('grassMasterSaveV2', JSON.stringify(data));
+    
+    if(autoSaveOnd) {
+        const t = document.getElementById('saveToast');
+        t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, 1500);
     }
+};
+
+window.load = () => { 
+    const saved = localStorage.getItem('grassMasterSaveV2');
+    if(!saved) return false;
+    const d = JSON.parse(saved);
+    
+    // Hard overschrijven van alle variabelen
+    geld = d.geld; totaalVerdiend = d.totaalVerdiend; totaalGemaaid = d.totaalGemaaid;
+    totaalUpgrades = d.totaalUpgrades; geclaimdeTrofeeën = d.geclaimdeTrofeeën;
+    grasWaarde = d.grasWaarde; huidigeSnelheid = d.huidigeSnelheid; huidigMowerRadius = d.huidigMowerRadius;
+    prijsRadius = d.prijsRadius; prijsSnelheid = d.prijsSnelheid; prijsWaarde = d.prijsWaarde;
+    countRadius = d.countRadius; countSnelheid = d.countSnelheid; countWaarde = d.countWaarde;
+    gpLevel = d.gpLevel; eventLevel = d.eventLevel; huidigeSkin = d.huidigeSkin;
+    ontgrendeldeSkins = d.ontgrendeldeSkins; autoSaveOnd = d.autoSaveOnd; gameMode = d.gameMode;
+    actieveOpdracht = d.actieveOpdracht; eventOpdracht = d.eventOpdracht;
+    rewardKlaar = d.rewardKlaar; eventRewardKlaar = d.eventRewardKlaar;
+    
+    return true;
+};
+
+window.finalReset = () => { localStorage.removeItem('grassMasterSaveV2'); location.reload(); };
+
+window.openResetConfirm = () => {
+    overlay.style.left = '0'; overlay.style.pointerEvents = 'auto';
+    overlay.innerHTML = `<div style="background:#7f1d1d; padding:60px; border:10px solid white; border-radius:40px; text-align:center;">
+        <h1 style="font-size:80px; color:white; margin-bottom:10px;">🛑 STOP!</h1>
+        <p style="font-size:30px; color:white; margin-bottom:40px;">Weet je het heel zeker? <br><b>Al je voortgang wordt gewist.</b></p>
+        <button onclick="window.finalReset()" style="width:450px; padding:25px; background:white; color:#7f1d1d; font-family:Impact; font-size:32px; cursor:pointer; border:none; border-radius:20px; margin-bottom:15px;">JA, WIS ALLES!</button>
+        <button onclick="window.openSettings()" style="width:450px; padding:20px; background:rgba(0,0,0,0.3); color:white; font-family:Impact; font-size:24px; cursor:pointer; border:2px solid white; border-radius:20px;">NEE, TERUG</button></div>`;
 };
 
 window.openSettings = () => {
     overlay.style.left = '0'; overlay.style.pointerEvents = 'auto';
-    overlay.innerHTML = `
-        <div style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
-            <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
-            <div style="display:flex; flex-direction:column; gap:20px; align-items:center;">
-                <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd?'#2ecc71':'#e74c3c'}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px;">AUTO-SAVE: ${autoSaveOnd?'AAN':'UIT'}</button>
-                <button onclick="gameMode=(gameMode==='classic'?'creative':'classic'); window.openSettings();" style="width:400px; padding:20px; background:${gameMode==='creative'?'#f1c40f':'#333'}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px;">MODE: ${gameMode.toUpperCase()}</button>
-                
-                <button onclick="window.resetGame()" style="width:400px; padding:20px; background:#c0392b; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:4px solid white; border-radius:15px; margin-top:20px;">⚠️ RESET GAME ⚠️</button>
-            </div>
-            <br>
-            <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button>
-        </div>`;
+    overlay.innerHTML = `<div style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
+        <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
+        <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd?'#2ecc71':'#e74c3c'}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd?'AAN':'UIT'}</button><br>
+        <button onclick="gameMode=(gameMode==='classic'?'creative':'classic'); window.openSettings();" style="width:400px; padding:20px; background:${gameMode==='creative'?'#f1c40f':'#333'}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
+        <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;">⚠️ RESET GAME ⚠️</button><br>
+        <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
 
 window.openCheat = () => {
     let c = (prompt("CODE:") || "").toUpperCase();
     if(c === "YEAHMAN") { geld += 500000; totaalVerdiend += 500000; window.updateUI(); }
-    if(c === "EVENT-EXPRESS") { eventLevel = 99; window.genereerMissie(true); window.updateUI(); alert("Level 99!"); }
     if(c === "MAXIMUM MIRACLE") {
         countRadius = MAX_RADIUS; countSnelheid = MAX_OTHER; countWaarde = MAX_OTHER;
-        huidigMowerRadius = 1.3 + (MAX_RADIUS * 0.3);
-        huidigeSnelheid = 0.15 + (MAX_OTHER * 0.02);
-        grasWaarde = 0.01 + (MAX_OTHER * 0.01);
+        huidigMowerRadius = 1.3 + (MAX_RADIUS * 0.3); huidigeSnelheid = 0.15 + (MAX_OTHER * 0.02); grasWaarde = 0.01 + (MAX_OTHER * 0.01);
         if(actieveOpdracht && actieveOpdracht.id === 'u') rewardKlaar = true;
         if(eventOpdracht && eventOpdracht.id === 'u') eventRewardKlaar = true;
-        window.updateUI(); alert("MAXIMAAL NIVEAU BEREIKT!");
+        window.updateUI();
     }
 };
 
-window.save = () => { 
-    if(autoSaveOnd) {
-        const data = { 
-            geld, totaalVerdiend, totaalGemaaid, totaalUpgrades, geclaimdeTrofeeën, 
-            grasWaarde, huidigeSnelheid, huidigMowerRadius, prijsRadius, prijsSnelheid, 
-            prijsWaarde, countRadius, countSnelheid, countWaarde, gpLevel, eventLevel, 
-            huidigeSkin, ontgrendeldeSkins, autoSaveOnd, gameMode,
-            actieveOpdracht, eventOpdracht, rewardKlaar, eventRewardKlaar
-        };
-        localStorage.setItem('grassMasterSaveV2', JSON.stringify(data));
-    }
-};
-
-window.load = () => { 
-    const d = JSON.parse(localStorage.getItem('grassMasterSaveV2')); 
-    if(!d) return; 
-    Object.assign(window, d);
+window.koop = (t) => {
+    if (gameMode === "creative") return;
+    if (t==='r' && countRadius < MAX_RADIUS && geld >= prijsRadius) { geld -= prijsRadius; huidigMowerRadius += 0.3; prijsRadius *= 1.6; countRadius++; totaalUpgrades++; }
+    if (t==='s' && countSnelheid < MAX_OTHER && geld >= prijsSnelheid) { geld -= prijsSnelheid; huidigeSnelheid += 0.02; prijsSnelheid *= 1.6; countSnelheid++; totaalUpgrades++; }
+    if (t==='w' && countWaarde < MAX_OTHER && geld >= prijsWaarde) { geld -= prijsWaarde; grasWaarde += 0.01; prijsWaarde *= 1.7; countWaarde++; totaalUpgrades++; }
     window.updateUI();
 };
 
@@ -264,7 +271,6 @@ function animate() {
     let s = gameMode === "creative" ? creativeSpeed : huidigeSnelheid;
     if(keys['w']||keys['z']) mower.position.z -= s; if(keys['s']) mower.position.z += s;
     if(keys['a']||keys['q']) mower.position.x -= s; if(keys['d']) mower.position.x += s;
-    
     grassArr.forEach(g => { 
         if(g.visible && mower.position.distanceTo(g.position) < huidigMowerRadius) { 
             g.visible = false; g.userData.cut = Date.now(); 
@@ -273,16 +279,16 @@ function animate() {
         } 
         if(!g.visible && Date.now() - g.userData.cut > regrowDelay) g.visible = true; 
     });
-    
     camera.position.set(mower.position.x, 15, mower.position.z + 15); 
     camera.lookAt(mower.position); renderer.render(scene, camera);
 }
 
 // --- 8. STARTUP ---
-setInterval(window.save, 5000);
-window.load(); 
-if(!actieveOpdracht) window.genereerMissie(false); 
-if(!eventOpdracht) window.genereerMissie(true); 
+const isGeladen = window.load();
+if(!isGeladen || !actieveOpdracht) window.genereerMissie(false); 
+if(!isGeladen || !eventOpdracht) window.genereerMissie(true); 
+
+setInterval(() => window.save(), 5000);
 window.updateUI();
 mower.material.color.set(alleSkinKleuren[huidigeSkin] || 0xff0000);
 animate();
