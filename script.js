@@ -1,4 +1,4 @@
-import * as THREE from 'https://unpkg.com/three@0.164.1/build/three.module.js';
+import * as THREE from 'three';
 
 // --- 1. ENGINE SETUP ---
 const scene = new THREE.Scene();
