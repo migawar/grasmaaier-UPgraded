@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 // --- 1. ENGINE SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x050505);
+scene.background = new THREE.Color(0x222222);
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -11,7 +11,11 @@ document.body.appendChild(renderer.domElement);
 // --- 2. GAME DATA (Standaardwaarden) ---
 let geld = 0, totaalVerdiend = 0, totaalGemaaid = 0, totaalUpgrades = 0;
 let trofeeën = 0, geclaimdeTrofeeën = 0; 
-let grasWaarde = 0.01, huidigeSnelheid = 0.15, huidigMowerRadius = 1.3;
+const BASE_GRASS_VALUE = 0.003;
+const VALUE_UPGRADE_STEP = 0.0002;
+const EARN_MULTIPLIER = 0.3;
+const BASE_SPEED = 0.07;
+let grasWaarde = BASE_GRASS_VALUE, huidigeSnelheid = BASE_SPEED, huidigMowerRadius = 1.3;
 let prijsRadius = 5, prijsSnelheid = 5, prijsWaarde = 10;
 let countRadius = 0, countSnelheid = 0, countWaarde = 0;
 const MAX_RADIUS = 50, MAX_OTHER = 200; 
@@ -200,6 +204,7 @@ window.load = () => {
     grasWaarde = d.grasWaarde; huidigeSnelheid = d.huidigeSnelheid; huidigMowerRadius = d.huidigMowerRadius;
     prijsRadius = d.prijsRadius; prijsSnelheid = d.prijsSnelheid; prijsWaarde = d.prijsWaarde;
     countRadius = d.countRadius; countSnelheid = d.countSnelheid; countWaarde = d.countWaarde;
+    grasWaarde = BASE_GRASS_VALUE + (countWaarde * VALUE_UPGRADE_STEP);
     gpLevel = d.gpLevel; eventLevel = d.eventLevel; huidigeSkin = d.huidigeSkin;
     ontgrendeldeSkins = d.ontgrendeldeSkins; autoSaveOnd = d.autoSaveOnd; gameMode = d.gameMode;
     actieveOpdracht = d.actieveOpdracht; eventOpdracht = d.eventOpdracht;
@@ -234,7 +239,7 @@ window.openCheat = () => {
     if(c === "YEAHMAN") { geld += 500000; totaalVerdiend += 500000; window.updateUI(); }
     if(c === "MAXIMUM MIRACLE") {
         countRadius = MAX_RADIUS; countSnelheid = MAX_OTHER; countWaarde = MAX_OTHER;
-        huidigMowerRadius = 1.3 + (MAX_RADIUS * 0.3); huidigeSnelheid = 0.15 + (MAX_OTHER * 0.02); grasWaarde = 0.01 + (MAX_OTHER * 0.01);
+        huidigMowerRadius = 1.3 + (MAX_RADIUS * 0.3); huidigeSnelheid = BASE_SPEED + (MAX_OTHER * 0.02); grasWaarde = BASE_GRASS_VALUE + (MAX_OTHER * VALUE_UPGRADE_STEP);
         if(actieveOpdracht && actieveOpdracht.id === 'u') rewardKlaar = true;
         if(eventOpdracht && eventOpdracht.id === 'u') eventRewardKlaar = true;
         window.updateUI();
@@ -243,59 +248,174 @@ window.openCheat = () => {
 
 window.koop = (t) => {
     if (gameMode === "creative") return;
-    if (t==='r' && countRadius < MAX_RADIUS && geld >= prijsRadius) { geld -= prijsRadius; huidigMowerRadius += 0.3; prijsRadius *= 1.6; countRadius++; totaalUpgrades++; }
-    if (t==='s' && countSnelheid < MAX_OTHER && geld >= prijsSnelheid) { geld -= prijsSnelheid; huidigeSnelheid += 0.02; prijsSnelheid *= 1.6; countSnelheid++; totaalUpgrades++; }
-    if (t==='w' && countWaarde < MAX_OTHER && geld >= prijsWaarde) { geld -= prijsWaarde; grasWaarde += 0.01; prijsWaarde *= 1.7; countWaarde++; totaalUpgrades++; }
+    if (t==='r' && countRadius < MAX_RADIUS && geld >= prijsRadius) { geld -= prijsRadius; huidigMowerRadius += 0.3; prijsRadius *= 1.75; countRadius++; totaalUpgrades++; }
+    if (t==='s' && countSnelheid < MAX_OTHER && geld >= prijsSnelheid) { geld -= prijsSnelheid; huidigeSnelheid += 0.02; prijsSnelheid *= 1.75; countSnelheid++; totaalUpgrades++; }
+    if (t==='w' && countWaarde < MAX_OTHER && geld >= prijsWaarde) { geld -= prijsWaarde; grasWaarde += VALUE_UPGRADE_STEP; prijsWaarde *= 1.9; countWaarde++; totaalUpgrades++; }
     window.updateUI();
 };
 
 // --- 7. ENGINE LOOP ---
-const mower = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 1.2), new THREE.MeshStandardMaterial({color: 0xff0000}));
-scene.add(mower, new THREE.AmbientLight(0xffffff, 0.9));
-const light = new THREE.DirectionalLight(0xffffff, 1); light.position.set(5, 15, 5); scene.add(light);
-camera.position.set(0, 15, 15);
+const mower = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 1.2), new THREE.MeshLambertMaterial({color: 0xff0000}));
+mower.position.set(0, 0.3, 0);
+scene.add(mower, new THREE.AmbientLight(0x404040));
+const light = new THREE.DirectionalLight(0xffffff, 1); light.position.set(20, 50, 20); scene.add(light);
+camera.position.set(0, 5, 7);
+const MAP_HALF_SIZE = 50;
+const MAP_SIZE = MAP_HALF_SIZE * 2;
+const GRASS_DENSITY = 5;
+const GRASS_SPACING = 1 / GRASS_DENSITY;
+const GRASS_VISIBLE_Y = 0.1;
+const GRASS_HIDDEN_Y = -10;
+const CAMERA_OFFSET = new THREE.Vector3(0, 5, 7);
 
 // Grondvlak om een zwarte leegte te voorkomen
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x1a2a1a }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshLambertMaterial({ color: 0x3b7d3b }));
 ground.rotation.x = -Math.PI / 2;
-ground.position.y = -0.251; // Net onder de maaier om visuele glitches te voorkomen
 scene.add(ground);
 
-const grassArr = [];
-for(let x=-25; x<25; x+=0.8) { 
-    for(let z=-25; z<25; z+=0.8) { 
-        const g = new THREE.Mesh(new THREE.BoxGeometry(0.3,0.3,0.3), new THREE.MeshStandardMaterial({color: 0x2ecc71})); 
-        g.position.set(x,0,z); g.userData = {cut: 0}; scene.add(g); grassArr.push(g); 
-    } 
+const grassPerSide = Math.floor(MAP_SIZE / GRASS_SPACING);
+const totalGrass = grassPerSide * grassPerSide;
+const grassGeometry = new THREE.SphereGeometry(0.1, 6, 6);
+const grassMaterial = new THREE.MeshLambertMaterial({ color: 0x008000 });
+const grassMesh = new THREE.InstancedMesh(grassGeometry, grassMaterial, totalGrass);
+grassMesh.frustumCulled = false;
+scene.add(grassMesh);
+
+const grassDummy = new THREE.Object3D();
+const grassData = new Array(totalGrass);
+const regrowQueue = [];
+let regrowQueueHead = 0;
+const UI_UPDATE_INTERVAL_MS = 100;
+let uiDirty = false;
+let lastUiUpdate = 0;
+let grassIndex = 0;
+for (let x = 0; x < grassPerSide; x++) {
+    for (let z = 0; z < grassPerSide; z++) {
+        const gx = -MAP_HALF_SIZE + (x * GRASS_SPACING) + (Math.random() * 0.05);
+        const gz = -MAP_HALF_SIZE + (z * GRASS_SPACING) + (Math.random() * 0.05);
+        grassData[grassIndex] = { x: gx, z: gz, cut: false, cutTime: 0, regrowAt: 0 };
+        grassDummy.position.set(gx, GRASS_VISIBLE_Y, gz);
+        grassDummy.updateMatrix();
+        grassMesh.setMatrixAt(grassIndex, grassDummy.matrix);
+        grassIndex++;
+    }
 }
+grassMesh.instanceMatrix.needsUpdate = true;
 
 window.onkeydown=(e)=>keys[e.key.toLowerCase()]=true; 
 window.onkeyup=(e)=>keys[e.key.toLowerCase()]=false;
 
+function cutGrassAtIndex(i, now) {
+    const g = grassData[i];
+    if (g.cut) return false;
+    g.cut = true;
+    g.cutTime = now;
+    g.regrowAt = now + regrowDelay;
+    regrowQueue.push(i);
+    grassDummy.position.set(g.x, GRASS_HIDDEN_Y, g.z);
+    grassDummy.updateMatrix();
+    grassMesh.setMatrixAt(i, grassDummy.matrix);
+    if (gameMode === "classic") {
+        const opbrengst = grasWaarde * EARN_MULTIPLIER;
+        geld += opbrengst;
+        totaalVerdiend += opbrengst;
+        totaalGemaaid++;
+        uiDirty = true;
+    }
+    return true;
+}
+
 function animate() {
     requestAnimationFrame(animate);
     let s = gameMode === "creative" ? creativeSpeed : huidigeSnelheid;
-    if(keys['w']||keys['z']) mower.position.z -= s; if(keys['s']) mower.position.z += s;
-    if(keys['a']||keys['q']) mower.position.x -= s; if(keys['d']) mower.position.x += s;
-    grassArr.forEach(g => { 
-        if(gameMode === "creative") {
-            if(g.position.x < mower.position.x - 25) { g.position.x += 50; g.visible = true; }
-            if(g.position.x > mower.position.x + 25) { g.position.x -= 50; g.visible = true; }
-            if(g.position.z < mower.position.z - 25) { g.position.z += 50; g.visible = true; }
-            if(g.position.z > mower.position.z + 25) { g.position.z -= 50; g.visible = true; }
-        }
+    const now = Date.now();
+    if(keys['w'] || keys['z'] || keys['arrowup']) mower.position.z -= s;
+    if(keys['s'] || keys['arrowdown']) mower.position.z += s;
+    if(keys['a'] || keys['q'] || keys['arrowleft']) mower.position.x -= s;
+    if(keys['d'] || keys['arrowright']) mower.position.x += s;
+    const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
+    let matrixUpdateNodig = false;
 
-        if(g.visible && mower.position.distanceTo(g.position) < huidigMowerRadius) { 
-            g.visible = false; g.userData.cut = Date.now(); 
-            if(gameMode === "classic") { 
-                geld += grasWaarde; totaalVerdiend += grasWaarde; 
-                totaalGemaaid++; window.updateUI(); 
+    if (gameMode === "creative") {
+        for (let i = 0; i < totalGrass; i++) {
+            const g = grassData[i];
+            let wrapped = false;
+            if(g.x < mower.position.x - MAP_HALF_SIZE) { g.x += MAP_SIZE; wrapped = true; }
+            if(g.x > mower.position.x + MAP_HALF_SIZE) { g.x -= MAP_SIZE; wrapped = true; }
+            if(g.z < mower.position.z - MAP_HALF_SIZE) { g.z += MAP_SIZE; wrapped = true; }
+            if(g.z > mower.position.z + MAP_HALF_SIZE) { g.z -= MAP_SIZE; wrapped = true; }
+            if (wrapped) {
+                g.cut = false;
+                g.cutTime = 0;
+                g.regrowAt = 0;
+                grassDummy.position.set(g.x, GRASS_VISIBLE_Y, g.z);
+                grassDummy.updateMatrix();
+                grassMesh.setMatrixAt(i, grassDummy.matrix);
+                matrixUpdateNodig = true;
             }
-        } 
-        if(!g.visible && Date.now() - g.userData.cut > regrowDelay) g.visible = true; 
-    });
-    camera.position.set(mower.position.x, 15, mower.position.z + 15); 
-    camera.lookAt(mower.position); renderer.render(scene, camera);
+            const dx = g.x - mower.position.x;
+            const dz = g.z - mower.position.z;
+            if((dx * dx) + (dz * dz) < maaierRadiusSq) {
+                if (cutGrassAtIndex(i, now)) {
+                    matrixUpdateNodig = true;
+                }
+            }
+        }
+    } else {
+        const minX = Math.max(0, Math.floor((mower.position.x - huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING) - 1);
+        const maxX = Math.min(grassPerSide - 1, Math.floor((mower.position.x + huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING) + 1);
+        const minZ = Math.max(0, Math.floor((mower.position.z - huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING) - 1);
+        const maxZ = Math.min(grassPerSide - 1, Math.floor((mower.position.z + huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING) + 1);
+
+        for (let x = minX; x <= maxX; x++) {
+            const rowOffset = x * grassPerSide;
+            for (let z = minZ; z <= maxZ; z++) {
+                const i = rowOffset + z;
+                const g = grassData[i];
+                if (g.cut) continue;
+                const dx = g.x - mower.position.x;
+                const dz = g.z - mower.position.z;
+                if ((dx * dx) + (dz * dz) < maaierRadiusSq) {
+                    if (cutGrassAtIndex(i, now)) {
+                        matrixUpdateNodig = true;
+                    }
+                }
+            }
+        }
+    }
+
+    while (regrowQueueHead < regrowQueue.length) {
+        const i = regrowQueue[regrowQueueHead];
+        const g = grassData[i];
+        if (!g.cut) {
+            regrowQueueHead++;
+            continue;
+        }
+        if (g.regrowAt > now) break;
+        g.cut = false;
+        g.cutTime = 0;
+        g.regrowAt = 0;
+        grassDummy.position.set(g.x, GRASS_VISIBLE_Y, g.z);
+        grassDummy.updateMatrix();
+        grassMesh.setMatrixAt(i, grassDummy.matrix);
+        matrixUpdateNodig = true;
+        regrowQueueHead++;
+    }
+    if (regrowQueueHead > 5000 && regrowQueueHead > (regrowQueue.length >> 1)) {
+        regrowQueue.splice(0, regrowQueueHead);
+        regrowQueueHead = 0;
+    }
+
+    if (uiDirty && now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
+        window.updateUI();
+        lastUiUpdate = now;
+        uiDirty = false;
+    }
+    if (matrixUpdateNodig) grassMesh.instanceMatrix.needsUpdate = true;
+    const camPos = mower.position.clone().add(CAMERA_OFFSET);
+    camera.position.lerp(camPos, 0.1);
+    camera.lookAt(mower.position);
+    renderer.render(scene, camera);
 }
 
 // --- 8. STARTUP ---
