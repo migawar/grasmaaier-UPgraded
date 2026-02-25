@@ -26,9 +26,9 @@ let trofeeën = 0,
 const BASE_GRASS_VALUE = 0.003;
 const VALUE_UPGRADE_STEP = 0.0002;
 const EARN_MULTIPLIER = 0.3;
-const DIAMANT_KOOP_PRIJS = 100;
 const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
+const GRASSPASS_DIAMANT_REWARD = 1;
 let grasWaarde = BASE_GRASS_VALUE,
   huidigeSnelheid = BASE_SPEED,
   huidigMowerRadius = 1.3;
@@ -208,7 +208,7 @@ window.updateUI = () => {
 window.openTrofee = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">🏆 TROFEEËNPAD</h1><p style="margin-bottom:20px;">VERDIEN $100.000 PER TROFEE</p>`;
+  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">🏆 TROFEEËNPAD</h1><p style="margin-bottom:20px;">VERDIEN $100.000 VOOR EEN  TROFEE</p>`;
   for (let i = 1; i <= 10; i++) {
     let geclaimd = i <= geclaimdeTrofeeën,
       kan = i <= trofeeën && !geclaimd;
@@ -250,7 +250,7 @@ window.openShop = () => {
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
         <p style="font-size:24px; margin:8px 0; color:#2ecc71;">Geld: $${geld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         <p style="font-size:26px; margin:10px 0 25px 0;">Diamanten: <span style="color:#85c1e9;">${diamanten}</span></p>
-        <button onclick="window.koopDiamant()" style="width:100%; padding:18px; background:#2e86c1; color:white; border:3px solid white; border-radius:14px; cursor:pointer; font-family:Impact; font-size:25px; margin-bottom:12px;">KOOP 1 DIAMANT VOOR $${DIAMANT_KOOP_PRIJS}</button>
+        <div style="width:100%; padding:14px; background:#1f2937; color:#93c5fd; border:3px solid #334155; border-radius:14px; font-family:Impact; font-size:22px; margin-bottom:12px;">DIAMANTEN KRIJG JE VIA GRASS PASS</div>
         <button onclick="window.koopShopUpgrade()" style="width:100%; padding:18px; background:${diamanten >= shopUpgradePrijs ? "#27ae60" : "#555"}; color:white; border:3px solid white; border-radius:14px; cursor:${diamanten >= shopUpgradePrijs ? "pointer" : "default"}; font-family:Impact; font-size:25px;">VERDIENSTEN x1.1 (${shopUpgradePrijs}D)</button>
         <p style="font-size:22px; color:#ccc; margin-top:18px;">Huidig: x${verdienMultiplier.toFixed(2)} | Volgend: x${volgendeMulti}</p>
         <button onclick="window.sluit()" style="margin-top:16px; padding:14px 50px; background:#5dade2; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
@@ -258,16 +258,7 @@ window.openShop = () => {
 };
 
 window.koopDiamant = () => {
-  const prijs = Number(DIAMANT_KOOP_PRIJS) || 100;
-  const saldo = Number(geld) || 0;
-  if (saldo < prijs) {
-    alert(`Je hebt $${prijs} nodig voor 1 diamant.`);
-    return;
-  }
-  geld = Math.max(0, saldo - prijs);
-  diamanten = (Number(diamanten) || 0) + 1;
-  window.updateUI();
-  window.openShop();
+  alert("Diamanten kopen staat uit. Verdien diamanten via Grass Pass.");
 };
 
 window.koopShopUpgrade = () => {
@@ -314,12 +305,12 @@ window.openGP = () => {
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">LEVEL ${gpLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${actieveOpdracht.t}</p>
         <div style="width:500px; height:40px; background:#333; border:4px solid white; margin:30px auto; border-radius:20px; overflow:hidden;"><div style="width:${(v / actieveOpdracht.d) * 100}%; height:100%; background:#f1c40f;"></div></div>
-        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? "CLAIM $5.000" : "LOCKED"}</button>
+        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? `CLAIM ${GRASSPASS_DIAMANT_REWARD} DIAMANT` : "LOCKED"}</button>
         <br><button onclick="window.sluit()" style="margin-top:30px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button></div>`;
 };
 window.claimGP = () => {
   if (rewardKlaar) {
-    geld += 7,5;
+    diamanten += GRASSPASS_DIAMANT_REWARD;
     gpLevel++;
     window.genereerMissie(false);
     window.sluit();
@@ -330,6 +321,8 @@ window.claimGP = () => {
 window.openEvent = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
+  const skinClaimKlaar =
+    eventLevel >= 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam);
   const v = Math.min(
     window.getStat(eventOpdracht.id) - eventOpdracht.start,
     eventOpdracht.d,
@@ -338,13 +331,14 @@ window.openEvent = () => {
         <h1 style="color:#9b59b6; font-size:70px; margin-bottom:5px;">📅 ${huidigeMaandNaam}</h1>
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">EVENT LEVEL ${eventLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${eventOpdracht.t}</p>
+        <p style="font-size:22px; color:#ddd; margin-top:6px;">SKIN WORDT ONTGRENDELD OP LEVEL 100</p>
         <div style="width:500px; height:40px; background:#333; border:4px solid white; margin:30px auto; border-radius:20px; overflow:hidden;"><div style="width:${(v / eventOpdracht.d) * 100}%; height:100%; background:#9b59b6;"></div></div>
-        <button onclick="window.claimEvent()" style="padding:25px 70px; background:${eventRewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${eventRewardKlaar ? `CLAIM SKIN` : "VERGRENDELD"}</button>
+        <button onclick="window.claimEvent()" style="padding:25px 70px; background:${eventRewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${eventRewardKlaar ? (skinClaimKlaar ? "CLAIM SKIN" : "CLAIM LEVEL") : "VERGRENDELD"}</button>
         <br><button onclick="window.sluit()" style="margin-top:30px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button></div>`;
 };
 window.claimEvent = () => {
   if (eventRewardKlaar) {
-    if (!ontgrendeldeSkins.includes(huidigeMaandNaam))
+    if (eventLevel >= 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam))
       ontgrendeldeSkins.push(huidigeMaandNaam);
     eventLevel++;
     window.genereerMissie(true);
