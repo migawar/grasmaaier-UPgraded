@@ -50,6 +50,24 @@ let totaalSpeeltijdSec = 0;
 let lichtKleur = "default";
 let radDraaiCount = 0;
 let radIsSpinning = false;
+let miniGameKnopZichtbaar = false;
+let miniGameVolgendeCheckAt = 0;
+let miniGameCooldownTot = 0;
+let miniGameTimer = null;
+let miniGameActief = false;
+let miniGameMarkerPos = 0;
+let miniGameMarkerRichting = 1;
+const MINIGAME_CHECK_INTERVAL_MS = 15000;
+const MINIGAME_KANS = 0.18;
+const MINIGAME_COOLDOWN_MS = 45000;
+const MINIGAME_REWARD_DIAMANT = 1;
+const MINIGAME_KNOP_DUUR_MS = 30000;
+const MINIGAME_RONDES = 3;
+const MINIGAME_ZONE_BREEDTES = [24, 16, 10];
+let miniGameRonde = 1;
+let miniGameKnopZichtbaarTot = 0;
+let basicStateVoorCreative = null;
+const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 
 const maanden = [
   "JANUARI",
@@ -93,8 +111,98 @@ const alleSkinKleuren = {
   NOVEMBER: 0x808080,
   DECEMBER: 0x8b0000,
 };
+const skinVisualOverrides = {
+  BLUE: {
+    emissive: 0x0f2f8f,
+    emissiveIntensity: 0.42,
+    specular: 0xd6e4ff,
+    shininess: 90,
+  },
+  JANUARI: {
+    emissive: 0x6f6f8a,
+    emissiveIntensity: 0.32,
+    specular: 0xffffff,
+    shininess: 110,
+  },
+  FEBRUARI: {
+    emissive: 0x7a2e52,
+    emissiveIntensity: 0.34,
+    specular: 0xffdeef,
+    shininess: 85,
+  },
+  MAART: {
+    emissive: 0x9a6a00,
+    emissiveIntensity: 0.35,
+    specular: 0xffefb0,
+    shininess: 95,
+  },
+  APRIL: {
+    emissive: 0x0f6b37,
+    emissiveIntensity: 0.33,
+    specular: 0xd8ffe7,
+    shininess: 80,
+  },
+  MEI: {
+    emissive: 0x4a2d11,
+    emissiveIntensity: 0.3,
+    specular: 0xf0d4b3,
+    shininess: 70,
+  },
+  JUNI: {
+    color: 0x121212,
+    emissive: 0x1c2b46,
+    emissiveIntensity: 0.38,
+    specular: 0xd7e7ff,
+    shininess: 105,
+  },
+  JULI: {
+    emissive: 0x8a7d00,
+    emissiveIntensity: 0.38,
+    specular: 0xfff7cc,
+    shininess: 95,
+  },
+  AUGUSTUS: {
+    emissive: 0x8f4d08,
+    emissiveIntensity: 0.35,
+    specular: 0xffdfbf,
+    shininess: 88,
+  },
+  SEPTEMBER: {
+    emissive: 0x4b1b6f,
+    emissiveIntensity: 0.35,
+    specular: 0xe6ccff,
+    shininess: 90,
+  },
+  OKTOBER: {
+    emissive: 0x103816,
+    emissiveIntensity: 0.3,
+    specular: 0xd1ffd7,
+    shininess: 80,
+  },
+  NOVEMBER: {
+    emissive: 0x444444,
+    emissiveIntensity: 0.28,
+    specular: 0xf0f0f0,
+    shininess: 72,
+  },
+  DECEMBER: {
+    emissive: 0x580b0b,
+    emissiveIntensity: 0.36,
+    specular: 0xffd0d0,
+    shininess: 88,
+  },
+};
 
 const keys = {};
+let mowerBodyMaterial = null;
+let mowerDetailedModel = null;
+let mowerRedBlock = null;
+let mowerBlueKit = null;
+let mowerBlueRotors = [];
+let mowerBlueAuraLight = null;
+let blueAuraPulse = 0;
+const normalizeGameMode = (mode) =>
+  mode === "creative" ? "creative" : "classic";
 
 // --- 3. CORE LOGICA ---
 window.getStat = (id) => {
@@ -144,11 +252,12 @@ ui.innerHTML = `
     <div id="geldDisp" style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.8); padding:15px 30px; border-radius:15px; border:4px solid #2ecc71; pointer-events:auto; color:#2ecc71; font-size:45px;">$ 0.00</div>
     <div id="diamantDisp" style="position:absolute; top:130px; left:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #5dade2; pointer-events:auto; color:#85c1e9; font-size:30px;">DIAMANTEN: 0</div>
     <div id="trofeeDisp" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:10px 25px; border-radius:15px; border:4px solid #f1c40f; pointer-events:auto; text-align:right;"></div>
+    <div id="miniGameSlot" style="position:absolute; top:145px; right:20px; pointer-events:auto;"></div>
     <button onclick="window.openSettings()" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:white; border:3px solid white; padding:10px 30px; border-radius:15px; font-size:20px; cursor:pointer; pointer-events:auto; font-family:Impact;">INSTELLINGEN</button>
-    <button onclick="window.openShop()" style="position:absolute; bottom:140px; left:25px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
+    <button id="shopBtn" onclick="window.openShop()" style="position:absolute; bottom:140px; left:25px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
     <div id="upgradeMenu" style="position:absolute; top:50%; left:20px; transform:translateY(-50%); display:flex; flex-direction:column; gap:12px; pointer-events:auto;"></div>
     <button id="gpBtn" onclick="window.openGP()" style="position:absolute; bottom:25px; left:25px; background:linear-gradient(to bottom, #f1c40f, #f39c12); color:white; border:5px solid white; padding:25px 50px; border-radius:20px; font-size:32px; cursor:pointer; pointer-events:auto; font-family:Impact;">GRASSPASS</button>
-    <div style="position:absolute; bottom:25px; right:25px; display:flex; flex-direction:column; gap:10px; align-items:flex-end; pointer-events:auto;">
+    <div id="rightPanel" style="position:absolute; bottom:25px; right:25px; display:flex; flex-direction:column; gap:10px; align-items:flex-end; pointer-events:auto;">
         <button onclick="window.openCheat()" style="background:#e74c3c; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">REDEEM CODE</button>
         <button id="eventBtn" onclick="window.openEvent()" style="background:#9b59b6; color:white; border:5px solid white; padding:20px 45px; border-radius:20px; font-size:24px; cursor:pointer; font-family:Impact;">EVENT</button>
     </div>
@@ -156,21 +265,71 @@ ui.innerHTML = `
 `;
 
 window.sluit = () => {
+  window.cleanupMiniGame();
   overlay.style.left = "-100%";
   overlay.style.pointerEvents = "none";
 };
 
 window.updateUI = () => {
+  const nu = Date.now();
+  const isCreative = gameMode === "creative";
+  const setDisplay = (id, show, display = "block") => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = show ? display : "none";
+  };
+  setDisplay("geldDisp", !isCreative);
+  setDisplay("diamantDisp", !isCreative);
+  setDisplay("trofeeDisp", !isCreative);
+  setDisplay("miniGameSlot", !isCreative);
+  setDisplay("shopBtn", !isCreative);
+  setDisplay("gpBtn", !isCreative);
+  setDisplay("rightPanel", !isCreative, "flex");
+
+  if (isCreative) {
+    miniGameKnopZichtbaar = false;
+    miniGameKnopZichtbaarTot = 0;
+  }
+  if (miniGameKnopZichtbaar && nu >= miniGameKnopZichtbaarTot) {
+    miniGameKnopZichtbaar = false;
+    miniGameKnopZichtbaarTot = 0;
+  }
+  if (!isCreative && !miniGameKnopZichtbaar && nu >= miniGameVolgendeCheckAt) {
+    miniGameVolgendeCheckAt = nu + MINIGAME_CHECK_INTERVAL_MS;
+    if (nu >= miniGameCooldownTot && Math.random() < MINIGAME_KANS) {
+      miniGameKnopZichtbaar = true;
+      miniGameKnopZichtbaarTot = nu + MINIGAME_KNOP_DUUR_MS;
+    }
+  }
   document.getElementById("geldDisp").innerText =
     `$ ${geld.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   document.getElementById("diamantDisp").innerText =
     `DIAMANTEN: ${diamanten.toLocaleString()}`;
   trofeeen = Math.floor(totaalVerdiend / 100000);
-  document.getElementById("trofeeDisp").innerHTML =
-    `<div style="color:#f1c40f; font-size:45px;">TROFEEEN: ${trofeeen}</div>
-        <button id="trofeePadBtn" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEENPAD</button>`;
-  const trofeePadBtn = document.getElementById("trofeePadBtn");
-  if (trofeePadBtn) trofeePadBtn.onclick = () => window.openTrofee();
+  const miniGameBtnHtml = miniGameKnopZichtbaar
+    ? `<button id="miniGameBtn" style="margin-top:8px; background:#16a085; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">MINIGAME</button>`
+    : "";
+  if (!isCreative) {
+    document.getElementById("trofeeDisp").innerHTML =
+      `<div style="color:#f1c40f; font-size:45px;">TROFEEEN: ${trofeeen}</div>
+          <button id="trofeePadBtn" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEENPAD</button>`;
+    document.getElementById("miniGameSlot").innerHTML = miniGameBtnHtml;
+    const trofeePadBtn = document.getElementById("trofeePadBtn");
+    if (trofeePadBtn) trofeePadBtn.onclick = () => window.openTrofee();
+    const miniGameBtn = document.getElementById("miniGameBtn");
+    if (miniGameBtn) miniGameBtn.onclick = () => window.openMiniGame();
+  } else {
+    document.getElementById("upgradeMenu").innerHTML = `
+        <div style="padding:14px; background:#1d2835; border:3px solid #3b82f6; border-radius:12px;">
+          <div style="font-size:20px; color:#bfdbfe;">RADIUS: <span id="creativeRadiusVal">${huidigMowerRadius.toFixed(1)}</span></div>
+          <input type="range" min="1.3" max="16" step="0.1" value="${huidigMowerRadius.toFixed(1)}" oninput="window.setCreativeRadius(this.value)" style="width:280px;">
+        </div>
+        <div style="padding:14px; background:#1d2835; border:3px solid #3b82f6; border-radius:12px;">
+          <div style="font-size:20px; color:#bfdbfe;">SPEED: <span id="creativeSpeedVal">${creativeSpeed.toFixed(2)}</span></div>
+          <input type="range" min="0.08" max="2.2" step="0.01" value="${creativeSpeed.toFixed(2)}" oninput="window.setCreativeSpeed(this.value)" style="width:280px;">
+        </div>
+        <button onclick="window.openSkins()" style="padding:12px; background:#3498db; color:white; border:3px solid white; border-radius:12px; cursor:pointer; font-size:20px; font-family:Impact; margin-top:12px;"> SKINS</button>`;
+    return;
+  }
 
   const isMax = (t) =>
     t === "r"
@@ -211,6 +370,167 @@ window.updateUI = () => {
 };
 
 // --- 5. OVERIGE FUNCTIES ---
+window.openInfoPage = () => {
+  window.location.href = "info.html";
+};
+
+window.setCreativeRadius = (value) => {
+  huidigMowerRadius = Number(value);
+  const el = document.getElementById("creativeRadiusVal");
+  if (el) el.innerText = huidigMowerRadius.toFixed(1);
+};
+
+window.setCreativeSpeed = (value) => {
+  creativeSpeed = Number(value);
+  const el = document.getElementById("creativeSpeedVal");
+  if (el) el.innerText = creativeSpeed.toFixed(2);
+};
+
+window.applySkinVisual = (skinNaam) => {
+  if (!mowerBodyMaterial) return;
+  const basisKleur = alleSkinKleuren[skinNaam] ?? 0xff0000;
+  const isRed = skinNaam === "RED";
+  const isBlue = skinNaam === "BLUE";
+  const override = skinVisualOverrides[skinNaam] || {};
+
+  const color = override.color ?? basisKleur;
+  const emissive = override.emissive ?? (isRed ? 0x220000 : 0x1f1f1f);
+  const emissiveIntensity =
+    override.emissiveIntensity ?? (isRed ? 0.12 : 0.3);
+  const specular = override.specular ?? (isRed ? 0x333333 : 0xcfcfcf);
+  const shininess = override.shininess ?? (isRed ? 22 : 70);
+
+  if (mowerRedBlock) {
+    mowerRedBlock.visible = isRed;
+    mowerRedBlock.material.color.set(0xff0000);
+  }
+  if (mowerDetailedModel) mowerDetailedModel.visible = !isRed;
+  if (mowerBlueKit) mowerBlueKit.visible = isBlue;
+  if (mowerBlueAuraLight) mowerBlueAuraLight.visible = isBlue;
+
+  mowerBodyMaterial.color.set(color);
+  mowerBodyMaterial.emissive.set(emissive);
+  mowerBodyMaterial.emissiveIntensity = isBlue
+    ? emissiveIntensity + 0.12
+    : emissiveIntensity;
+  mowerBodyMaterial.specular.set(specular);
+  mowerBodyMaterial.shininess = isBlue ? shininess + 22 : shininess;
+};
+
+window.maakBasicSnapshot = () => ({
+  geld,
+  totaalVerdiend,
+  totaalGemaaid,
+  totaalUpgrades,
+  diamanten,
+  geclaimdeTrofeeen,
+  grasWaarde,
+  huidigeSnelheid,
+  huidigMowerRadius,
+  prijsRadius,
+  prijsSnelheid,
+  prijsWaarde,
+  countRadius,
+  countSnelheid,
+  countWaarde,
+  gpLevel,
+  eventLevel,
+  actieveOpdracht: actieveOpdracht ? { ...actieveOpdracht } : null,
+  eventOpdracht: eventOpdracht ? { ...eventOpdracht } : null,
+  rewardKlaar,
+  eventRewardKlaar,
+  huidigeSkin,
+  ontgrendeldeSkins: [...ontgrendeldeSkins],
+  shopUpgradeLevel,
+  shopUpgradePrijs,
+  verdienMultiplier,
+  radDraaiCount,
+  creativeSpeed,
+  mowerX: mower.position.x,
+  mowerZ: mower.position.z,
+});
+
+window.herstelBasicSnapshot = (snapshot) => {
+  if (!snapshot) return false;
+  geld = snapshot.geld;
+  totaalVerdiend = snapshot.totaalVerdiend;
+  totaalGemaaid = snapshot.totaalGemaaid;
+  totaalUpgrades = snapshot.totaalUpgrades;
+  diamanten = snapshot.diamanten;
+  geclaimdeTrofeeen = snapshot.geclaimdeTrofeeen;
+  grasWaarde = snapshot.grasWaarde;
+  huidigeSnelheid = snapshot.huidigeSnelheid;
+  huidigMowerRadius = snapshot.huidigMowerRadius;
+  prijsRadius = snapshot.prijsRadius;
+  prijsSnelheid = snapshot.prijsSnelheid;
+  prijsWaarde = snapshot.prijsWaarde;
+  countRadius = snapshot.countRadius;
+  countSnelheid = snapshot.countSnelheid;
+  countWaarde = snapshot.countWaarde;
+  gpLevel = snapshot.gpLevel;
+  eventLevel = snapshot.eventLevel;
+  actieveOpdracht = snapshot.actieveOpdracht ? { ...snapshot.actieveOpdracht } : null;
+  eventOpdracht = snapshot.eventOpdracht ? { ...snapshot.eventOpdracht } : null;
+  rewardKlaar = snapshot.rewardKlaar;
+  eventRewardKlaar = snapshot.eventRewardKlaar;
+  huidigeSkin = snapshot.huidigeSkin;
+  ontgrendeldeSkins = [...snapshot.ontgrendeldeSkins];
+  shopUpgradeLevel = snapshot.shopUpgradeLevel;
+  shopUpgradePrijs = snapshot.shopUpgradePrijs;
+  verdienMultiplier = snapshot.verdienMultiplier;
+  radDraaiCount = snapshot.radDraaiCount;
+  creativeSpeed = snapshot.creativeSpeed;
+  mower.position.x = snapshot.mowerX;
+  mower.position.z = snapshot.mowerZ;
+  window.applySkinVisual(huidigeSkin);
+  return true;
+};
+
+window.toggleGameMode = () => {
+  if (gameMode === "classic") {
+    basicStateVoorCreative = window.maakBasicSnapshot();
+    try {
+      localStorage.setItem(
+        CREATIVE_BACKUP_KEY,
+        JSON.stringify(basicStateVoorCreative),
+      );
+    } catch {}
+
+    gameMode = "creative";
+
+    // Creative moet direct speelbaar zijn, dus reset gemaaid gras zichtbaar.
+    regrowQueue.length = 0;
+    regrowQueueHead = 0;
+    for (let i = 0; i < totalGrass; i++) {
+      const g = grassData[i];
+      g.cut = false;
+      g.cutTime = 0;
+      g.regrowAt = 0;
+      grassDummy.position.set(g.x, GRASS_VISIBLE_Y, g.z);
+      grassDummy.updateMatrix();
+      grassMesh.setMatrixAt(i, grassDummy.matrix);
+    }
+    grassMesh.instanceMatrix.needsUpdate = true;
+  } else {
+    gameMode = "classic";
+    let teHerstellen = basicStateVoorCreative;
+    if (!teHerstellen) {
+      const raw = localStorage.getItem(CREATIVE_BACKUP_KEY);
+      if (raw) {
+        try {
+          teHerstellen = JSON.parse(raw);
+        } catch {}
+      }
+    }
+    window.herstelBasicSnapshot(teHerstellen);
+    basicStateVoorCreative = null;
+    localStorage.removeItem(CREATIVE_BACKUP_KEY);
+  }
+
+  window.updateUI();
+  window.openSettings();
+};
+
 window.openTrofee = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
@@ -228,6 +548,110 @@ window.openTrofee = () => {
   overlay.innerHTML =
     h +
     `<button onclick="window.sluit()" style="margin-top:20px; padding:15px 60px; background:#f1c40f; color:black; border:none; border-radius:15px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button></div>`;
+};
+
+window.cleanupMiniGame = () => {
+  if (miniGameTimer) {
+    clearInterval(miniGameTimer);
+    miniGameTimer = null;
+  }
+  miniGameActief = false;
+};
+
+window.openMiniGame = () => {
+  if (!miniGameKnopZichtbaar) {
+    alert("Minigame is nu niet beschikbaar.");
+    return;
+  }
+  miniGameKnopZichtbaar = false;
+  miniGameKnopZichtbaarTot = 0;
+  window.cleanupMiniGame();
+  miniGameActief = true;
+  miniGameRonde = 1;
+  miniGameMarkerPos = 0;
+  miniGameMarkerRichting = 1;
+
+  window.renderMiniGame();
+
+  miniGameTimer = setInterval(() => {
+    const marker = document.getElementById("miniGameMarker");
+    if (!marker) {
+      window.cleanupMiniGame();
+      return;
+    }
+    miniGameMarkerPos += miniGameMarkerRichting * 1.9;
+    if (miniGameMarkerPos >= 100) {
+      miniGameMarkerPos = 100;
+      miniGameMarkerRichting = -1;
+    } else if (miniGameMarkerPos <= 0) {
+      miniGameMarkerPos = 0;
+      miniGameMarkerRichting = 1;
+    }
+    marker.style.left = `${miniGameMarkerPos}%`;
+  }, 16);
+};
+
+window.getMiniGameZone = () => {
+  const index = Math.min(miniGameRonde - 1, MINIGAME_ZONE_BREEDTES.length - 1);
+  const breedte = MINIGAME_ZONE_BREEDTES[index];
+  const start = 50 - breedte / 2;
+  const einde = start + breedte;
+  return { start, einde, breedte };
+};
+
+window.renderMiniGame = (statusTekst = "") => {
+  const zone = window.getMiniGameZone();
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #16a085; border-radius:30px; text-align:center; min-width:560px;">
+      <h1 style="color:#1abc9c; font-size:56px; margin:0 0 8px 0;">MINIGAME</h1>
+      <p style="font-size:24px; margin:0 0 6px 0;">Ronde ${miniGameRonde}/${MINIGAME_RONDES}</p>
+      <p style="font-size:22px; margin:0 0 18px 0;">Klik STOP als de marker in de groene zone zit.</p>
+      <div style="position:relative; width:480px; height:34px; margin:0 auto; background:#2c3e50; border:3px solid white; border-radius:12px; overflow:hidden;">
+        <div style="position:absolute; left:${zone.start}%; width:${zone.breedte}%; height:100%; background:#27ae60; opacity:0.65;"></div>
+        <div id="miniGameMarker" style="position:absolute; left:0%; top:0; width:12px; height:100%; background:#ecf0f1;"></div>
+      </div>
+      <p style="font-size:20px; color:#d0ece7; min-height:24px; margin:12px 0 0 0;">${statusTekst}</p>
+      <button onclick="window.stopMiniGame()" style="margin-top:22px; padding:14px 54px; background:#e67e22; color:white; border:none; border-radius:12px; font-family:Impact; font-size:30px; cursor:pointer;">STOP</button>
+      <br><button onclick="window.sluit()" style="margin-top:16px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button>
+    </div>`;
+};
+
+window.stopMiniGame = () => {
+  if (!miniGameActief) return;
+  const zone = window.getMiniGameZone();
+  const gewonnen =
+    miniGameMarkerPos >= zone.start && miniGameMarkerPos <= zone.einde;
+
+  if (gewonnen && miniGameRonde < MINIGAME_RONDES) {
+    miniGameRonde++;
+    miniGameMarkerPos = 0;
+    miniGameMarkerRichting = 1;
+    window.renderMiniGame("Goed gedaan! Volgende ronde, kleiner veld.");
+    return;
+  }
+
+  window.cleanupMiniGame();
+  miniGameKnopZichtbaar = false;
+  miniGameKnopZichtbaarTot = 0;
+  miniGameCooldownTot = Date.now() + MINIGAME_COOLDOWN_MS;
+  miniGameVolgendeCheckAt = miniGameCooldownTot + MINIGAME_CHECK_INTERVAL_MS;
+
+  if (gewonnen) {
+    diamanten += MINIGAME_REWARD_DIAMANT;
+    overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #2ecc71; border-radius:30px; text-align:center; min-width:560px;">
+      <h1 style="color:#2ecc71; font-size:58px; margin:0;">GESLAAGD!</h1>
+      <p style="font-size:28px; margin-top:15px;">Je kreeg ${MINIGAME_REWARD_DIAMANT} diamant.</p>
+      <button onclick="window.sluit()" style="margin-top:18px; padding:14px 50px; background:#2ecc71; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
+    </div>`;
+  } else {
+    overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #e74c3c; border-radius:30px; text-align:center; min-width:560px;">
+      <h1 style="color:#e74c3c; font-size:58px; margin:0;">MISLUKT</h1>
+      <p style="font-size:26px; margin-top:15px;">Probeer het straks opnieuw.</p>
+      <button onclick="window.sluit()" style="margin-top:18px; padding:14px 50px; background:#e74c3c; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
+    </div>`;
+  }
+  window.updateUI();
 };
 
 window.claimT = (i) => {
@@ -326,14 +750,54 @@ window.kiesRadBeloning = () => {
   const diamantKlein = Math.max(1, Math.floor(1 + factor * 0.35));
   const diamantGroot = Math.max(2, Math.floor(2 + factor * 0.5));
   const pool = [
-    { weight: 32, type: "geld", amount: geldKlein, text: `$${geldKlein.toLocaleString()} geld` },
-    { weight: 22, type: "geld", amount: geldMidden, text: `$${geldMidden.toLocaleString()} geld` },
-    { weight: 9, type: "geld", amount: geldGroot, text: `$${geldGroot.toLocaleString()} geld` },
-    { weight: 18, type: "diamant", amount: diamantKlein, text: `${diamantKlein} diamant(en)` },
-    { weight: 8, type: "diamant", amount: diamantGroot, text: `${diamantGroot} diamant(en)` },
-    { weight: 5, type: "upgrade", upgradeType: "r", text: "Gratis Radius Upgrade" },
-    { weight: 3, type: "upgrade", upgradeType: "s", text: "Gratis Speed Upgrade" },
-    { weight: 3, type: "upgrade", upgradeType: "w", text: "Gratis Value Upgrade" },
+    {
+      weight: 32,
+      type: "geld",
+      amount: geldKlein,
+      text: `$${geldKlein.toLocaleString()} geld`,
+    },
+    {
+      weight: 22,
+      type: "geld",
+      amount: geldMidden,
+      text: `$${geldMidden.toLocaleString()} geld`,
+    },
+    {
+      weight: 9,
+      type: "geld",
+      amount: geldGroot,
+      text: `$${geldGroot.toLocaleString()} geld`,
+    },
+    {
+      weight: 18,
+      type: "diamant",
+      amount: diamantKlein,
+      text: `${diamantKlein} diamant(en)`,
+    },
+    {
+      weight: 8,
+      type: "diamant",
+      amount: diamantGroot,
+      text: `${diamantGroot} diamant(en)`,
+    },
+    {
+      weight: 5,
+      type: "upgrade",
+      upgradeType: "r",
+      text: "Gratis Radius Upgrade",
+    },
+    {
+      weight: 3,
+      type: "upgrade",
+      upgradeType: "s",
+      text: "Gratis Speed Upgrade",
+    },
+    {
+      weight: 3,
+      type: "upgrade",
+      upgradeType: "w",
+      text: "Gratis Value Upgrade",
+    },
   ];
   const totaal = pool.reduce((sum, p) => sum + p.weight, 0);
   let roll = Math.random() * totaal;
@@ -374,9 +838,7 @@ window.startRadAnimatie = (beloning) => {
     "Gratis Value Upgrade",
   ];
   const eindTekst =
-    beloning.type === "upgrade"
-      ? beloning.text
-      : `Je won ${beloning.text}`;
+    beloning.type === "upgrade" ? beloning.text : `Je won ${beloning.text}`;
   const animatieLijst = [...opties, eindTekst];
   const totaalTicks = 26 + Math.floor(Math.random() * 9);
   let tick = 0;
@@ -445,7 +907,7 @@ window.openSkins = () => {
   overlay.style.pointerEvents = "auto";
   let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
   ["RED", "BLUE", ...maanden].forEach((s) => {
-    const ok = ontgrendeldeSkins.includes(s),
+    const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
     h += `<button onclick="${ok ? `window.setSkin('${s}')` : ""}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;">${ok ? s : "LOCKED"}</button>`;
   });
@@ -455,7 +917,7 @@ window.openSkins = () => {
 };
 window.setSkin = (s) => {
   huidigeSkin = s;
-  mower.material.color.set(alleSkinKleuren[s]);
+  window.applySkinVisual(s);
   window.openSkins();
 };
 
@@ -601,7 +1063,7 @@ window.load = () => {
   huidigeSkin = d.huidigeSkin;
   ontgrendeldeSkins = d.ontgrendeldeSkins;
   autoSaveOnd = d.autoSaveOnd;
-  gameMode = d.gameMode;
+  gameMode = normalizeGameMode(d.gameMode);
   actieveOpdracht = d.actieveOpdracht;
   eventOpdracht = d.eventOpdracht;
   rewardKlaar = d.rewardKlaar;
@@ -612,7 +1074,8 @@ window.load = () => {
   verdienMultiplier =
     d.verdienMultiplier ?? Math.pow(SHOP_MULTIPLIER_STEP, shopUpgradeLevel);
   totaalSpeeltijdSec = d.totaalSpeeltijdSec ?? 0;
-  lichtKleur = d.lichtKleur === "blue" ? "hemelsblauw" : (d.lichtKleur ?? "default");
+  lichtKleur =
+    d.lichtKleur === "blue" ? "hemelsblauw" : (d.lichtKleur ?? "default");
   radDraaiCount = d.radDraaiCount ?? 0;
 
   return true;
@@ -620,6 +1083,7 @@ window.load = () => {
 
 window.finalReset = () => {
   localStorage.removeItem("grassMasterSaveV2");
+  localStorage.removeItem(CREATIVE_BACKUP_KEY);
   location.reload();
 };
 
@@ -639,8 +1103,9 @@ window.openSettings = () => {
   overlay.innerHTML = `<div style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
         <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
-        <button onclick="gameMode=(gameMode==='classic'?'creative':'classic'); window.openSettings();" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
+        <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
+        <button onclick="window.openInfoPage()" style="width:400px; padding:16px; background:#1f2937; color:#93c5fd; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">INFO PAGINA</button><br>
         <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;"> RESET GAME </button><br>
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
@@ -650,6 +1115,13 @@ window.openCheat = () => {
   if (c === "YEAHMAN") {
     geld += 500000;
     totaalVerdiend += 500000;
+    window.updateUI();
+  }
+  if (c === "MINIGAME123") {
+    miniGameKnopZichtbaar = true;
+    miniGameKnopZichtbaarTot = Date.now() + MINIGAME_KNOP_DUUR_MS;
+    miniGameCooldownTot = 0;
+    miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
     window.updateUI();
   }
   if (c === "MAXIMUM MIRACLE") {
@@ -692,30 +1164,241 @@ window.koop = (t) => {
 };
 
 // --- 7. ENGINE LOOP ---
-const mower = new THREE.Mesh(
+const mower = new THREE.Group();
+mowerRedBlock = new THREE.Mesh(
   new THREE.BoxGeometry(1.2, 0.5, 1.2),
   new THREE.MeshLambertMaterial({ color: 0xff0000 }),
 );
-mower.position.set(0, 0.3, 0);
+mowerRedBlock.position.set(0, 0.3, 0);
+mower.add(mowerRedBlock);
+
+mowerDetailedModel = new THREE.Group();
+mowerBodyMaterial = new THREE.MeshPhongMaterial({
+  color: 0xff0000,
+  emissive: 0x220000,
+  emissiveIntensity: 0.12,
+  specular: 0x333333,
+  shininess: 22,
+});
+
+const mowerBody = new THREE.Mesh(
+  new THREE.BoxGeometry(1.3, 0.45, 1.8),
+  mowerBodyMaterial,
+);
+mowerBody.position.set(0, 0.42, 0.1);
+mowerDetailedModel.add(mowerBody);
+
+const mowerDeck = new THREE.Mesh(
+  new THREE.BoxGeometry(1.45, 0.16, 1.05),
+  mowerBodyMaterial,
+);
+mowerDeck.position.set(0, 0.21, 0.8);
+mowerDetailedModel.add(mowerDeck);
+
+const mowerTop = new THREE.Mesh(
+  new THREE.BoxGeometry(0.9, 0.18, 0.7),
+  mowerBodyMaterial,
+);
+mowerTop.position.set(0, 0.72, -0.15);
+mowerDetailedModel.add(mowerTop);
+
+const wheelMaterial = new THREE.MeshPhongMaterial({
+  color: 0x111111,
+  specular: 0x777777,
+  shininess: 40,
+});
+const wheelGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.13, 18);
+const wheelOffsets = [
+  [-0.68, 0.2, -0.55],
+  [0.68, 0.2, -0.55],
+  [-0.68, 0.2, 0.62],
+  [0.68, 0.2, 0.62],
+];
+for (const [x, y, z] of wheelOffsets) {
+  const wheel = new THREE.Mesh(wheelGeo, wheelMaterial);
+  wheel.rotation.z = Math.PI / 2;
+  wheel.position.set(x, y, z);
+  mowerDetailedModel.add(wheel);
+}
+
+mowerBlueKit = new THREE.Group();
+const bluePaintMaterial = new THREE.MeshPhongMaterial({
+  color: 0x2f86ff,
+  emissive: 0x102f78,
+  emissiveIntensity: 0.45,
+  specular: 0xe6f0ff,
+  shininess: 130,
+});
+const blueDarkMetal = new THREE.MeshPhongMaterial({
+  color: 0x1d2c45,
+  specular: 0xc7d8ff,
+  shininess: 100,
+});
+const blueNeonMaterial = new THREE.MeshBasicMaterial({
+  color: 0x76c8ff,
+});
+
+const blueFrontNose = new THREE.Mesh(
+  new THREE.BoxGeometry(1.1, 0.12, 0.25),
+  bluePaintMaterial,
+);
+blueFrontNose.position.set(0, 0.32, 1.36);
+mowerBlueKit.add(blueFrontNose);
+
+const blueLeftWing = new THREE.Mesh(
+  new THREE.BoxGeometry(0.12, 0.24, 1.25),
+  bluePaintMaterial,
+);
+blueLeftWing.position.set(-0.66, 0.34, 0.26);
+mowerBlueKit.add(blueLeftWing);
+
+const blueRightWing = new THREE.Mesh(
+  new THREE.BoxGeometry(0.12, 0.24, 1.25),
+  bluePaintMaterial,
+);
+blueRightWing.position.set(0.66, 0.34, 0.26);
+mowerBlueKit.add(blueRightWing);
+
+const blueTopFin = new THREE.Mesh(
+  new THREE.BoxGeometry(0.2, 0.42, 0.6),
+  bluePaintMaterial,
+);
+blueTopFin.position.set(0, 0.95, -0.06);
+mowerBlueKit.add(blueTopFin);
+
+const blueTurbine = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.16, 0.16, 0.4, 20),
+  blueDarkMetal,
+);
+blueTurbine.position.set(0, 0.73, 0.98);
+blueTurbine.rotation.z = Math.PI / 2;
+mowerBlueKit.add(blueTurbine);
+
+const blueCore = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.07, 0.07, 0.42, 16),
+  bluePaintMaterial,
+);
+blueCore.position.set(0, 0.73, 0.98);
+blueCore.rotation.z = Math.PI / 2;
+mowerBlueKit.add(blueCore);
+
+const blueCanopy = new THREE.Mesh(
+  new THREE.BoxGeometry(0.72, 0.2, 0.5),
+  new THREE.MeshPhongMaterial({
+    color: 0x8ec5ff,
+    emissive: 0x2d4f89,
+    emissiveIntensity: 0.25,
+    specular: 0xffffff,
+    shininess: 160,
+  }),
+);
+blueCanopy.position.set(0, 0.83, -0.25);
+mowerBlueKit.add(blueCanopy);
+
+const blueRearSpoiler = new THREE.Mesh(
+  new THREE.BoxGeometry(1.08, 0.08, 0.22),
+  blueDarkMetal,
+);
+blueRearSpoiler.position.set(0, 0.93, -0.82);
+mowerBlueKit.add(blueRearSpoiler);
+
+const blueSpoilerSupportL = new THREE.Mesh(
+  new THREE.BoxGeometry(0.08, 0.2, 0.08),
+  bluePaintMaterial,
+);
+blueSpoilerSupportL.position.set(-0.42, 0.83, -0.77);
+mowerBlueKit.add(blueSpoilerSupportL);
+
+const blueSpoilerSupportR = new THREE.Mesh(
+  new THREE.BoxGeometry(0.08, 0.2, 0.08),
+  bluePaintMaterial,
+);
+blueSpoilerSupportR.position.set(0.42, 0.83, -0.77);
+mowerBlueKit.add(blueSpoilerSupportR);
+
+const blueFrontLightL = new THREE.Mesh(
+  new THREE.BoxGeometry(0.16, 0.08, 0.03),
+  blueNeonMaterial,
+);
+blueFrontLightL.position.set(-0.34, 0.39, 1.48);
+mowerBlueKit.add(blueFrontLightL);
+
+const blueFrontLightR = new THREE.Mesh(
+  new THREE.BoxGeometry(0.16, 0.08, 0.03),
+  blueNeonMaterial,
+);
+blueFrontLightR.position.set(0.34, 0.39, 1.48);
+mowerBlueKit.add(blueFrontLightR);
+
+const blueSidePodL = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.11, 0.11, 0.55, 14),
+  blueDarkMetal,
+);
+blueSidePodL.rotation.x = Math.PI / 2;
+blueSidePodL.position.set(-0.82, 0.52, 0.58);
+mowerBlueKit.add(blueSidePodL);
+
+const blueSidePodR = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.11, 0.11, 0.55, 14),
+  blueDarkMetal,
+);
+blueSidePodR.rotation.x = Math.PI / 2;
+blueSidePodR.position.set(0.82, 0.52, 0.58);
+mowerBlueKit.add(blueSidePodR);
+
+const blueRotorL = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.09, 0.09, 0.04, 18),
+  bluePaintMaterial,
+);
+blueRotorL.position.set(-0.82, 0.52, 0.88);
+blueRotorL.rotation.x = Math.PI / 2;
+mowerBlueKit.add(blueRotorL);
+
+const blueRotorR = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.09, 0.09, 0.04, 18),
+  bluePaintMaterial,
+);
+blueRotorR.position.set(0.82, 0.52, 0.88);
+blueRotorR.rotation.x = Math.PI / 2;
+mowerBlueKit.add(blueRotorR);
+
+mowerBlueRotors = [blueRotorL, blueRotorR];
+mowerBlueKit.rotation.y = Math.PI;
+
+mowerBlueKit.visible = false;
+mowerDetailedModel.add(mowerBlueKit);
+
+mower.add(mowerDetailedModel);
+
+mowerBlueAuraLight = new THREE.PointLight(0x4aa3ff, 1.1, 8.5, 2);
+mowerBlueAuraLight.position.set(0, 0.8, 0.2);
+mowerBlueAuraLight.visible = false;
+mower.add(mowerBlueAuraLight);
+
+mower.position.set(0, 0, 0);
 scene.add(mower, new THREE.AmbientLight(0x404040));
 const light = new THREE.DirectionalLight(0xffffff, 1);
 light.position.set(20, 50, 20);
 scene.add(light);
 camera.position.set(0, 5, 7);
-const MAP_HALF_SIZE = 50;
+const MAP_HALF_SIZE = 70;
 const MAP_SIZE = MAP_HALF_SIZE * 2;
 const GRASS_DENSITY = 5;
 const GRASS_SPACING = 1 / GRASS_DENSITY;
+const GRASS_POSITION_JITTER = 0;
 const GRASS_VISIBLE_Y = 0.1;
 const GRASS_HIDDEN_Y = -10;
 const CAMERA_OFFSET = new THREE.Vector3(0, 5, 7);
+const GROUND_COLOR = 0x2f8a2f;
+const GROUND_TILE_SIZE = MAP_SIZE;
 
-// Grondvlak om een zwarte leegte te voorkomen
+// Grond gelijk aan het actieve grasveld.
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE),
-  new THREE.MeshLambertMaterial({ color: 0x3b7d3b }),
+  new THREE.PlaneGeometry(GROUND_TILE_SIZE, GROUND_TILE_SIZE),
+  new THREE.MeshLambertMaterial({ color: GROUND_COLOR }),
 );
 ground.rotation.x = -Math.PI / 2;
+ground.position.set(0, -0.02, 0);
 scene.add(ground);
 
 const grassPerSide = Math.floor(MAP_SIZE / GRASS_SPACING);
@@ -741,8 +1424,10 @@ let lastFrameNow = Date.now();
 let grassIndex = 0;
 for (let x = 0; x < grassPerSide; x++) {
   for (let z = 0; z < grassPerSide; z++) {
-    const gx = -MAP_HALF_SIZE + x * GRASS_SPACING + Math.random() * 0.05;
-    const gz = -MAP_HALF_SIZE + z * GRASS_SPACING + Math.random() * 0.05;
+    const gx =
+      -MAP_HALF_SIZE + x * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
+    const gz =
+      -MAP_HALF_SIZE + z * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
     grassData[grassIndex] = {
       x: gx,
       z: gz,
@@ -781,6 +1466,11 @@ function cutGrassAtIndex(i, now) {
   return true;
 }
 
+function updateGroundTiles() {
+  ground.position.x = mower.position.x;
+  ground.position.z = mower.position.z;
+}
+
 function animate() {
   requestAnimationFrame(animate);
   let s = gameMode === "creative" ? creativeSpeed : huidigeSnelheid;
@@ -797,85 +1487,50 @@ function animate() {
   if (keys["s"] || keys["arrowdown"]) mower.position.z += s;
   if (keys["a"] || keys["q"] || keys["arrowleft"]) mower.position.x -= s;
   if (keys["d"] || keys["arrowright"]) mower.position.x += s;
+  if (mowerBlueKit && mowerBlueKit.visible && mowerBlueRotors.length) {
+    for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25;
+  }
+  if (mowerBlueAuraLight && mowerBlueAuraLight.visible) {
+    blueAuraPulse += deltaSec * 4.6;
+    mowerBlueAuraLight.intensity = 1.05 + Math.sin(blueAuraPulse) * 0.2;
+  }
+  updateGroundTiles();
   const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
   let matrixUpdateNodig = false;
 
-  if (gameMode === "creative") {
-    for (let i = 0; i < totalGrass; i++) {
-      const g = grassData[i];
-      let wrapped = false;
-      if (g.x < mower.position.x - MAP_HALF_SIZE) {
-        g.x += MAP_SIZE;
-        wrapped = true;
-      }
-      if (g.x > mower.position.x + MAP_HALF_SIZE) {
-        g.x -= MAP_SIZE;
-        wrapped = true;
-      }
-      if (g.z < mower.position.z - MAP_HALF_SIZE) {
-        g.z += MAP_SIZE;
-        wrapped = true;
-      }
-      if (g.z > mower.position.z + MAP_HALF_SIZE) {
-        g.z -= MAP_SIZE;
-        wrapped = true;
-      }
-      if (wrapped) {
-        g.cut = false;
-        g.cutTime = 0;
-        g.regrowAt = 0;
-        grassDummy.position.set(g.x, GRASS_VISIBLE_Y, g.z);
-        grassDummy.updateMatrix();
-        grassMesh.setMatrixAt(i, grassDummy.matrix);
-        matrixUpdateNodig = true;
-      }
-      const dx = g.x - mower.position.x;
-      const dz = g.z - mower.position.z;
-      if (dx * dx + dz * dz < maaierRadiusSq) {
-        if (cutGrassAtIndex(i, now)) {
-          matrixUpdateNodig = true;
-        }
-      }
+  for (let i = 0; i < totalGrass; i++) {
+    const g = grassData[i];
+    let wrapped = false;
+    if (g.x < mower.position.x - MAP_HALF_SIZE) {
+      g.x += MAP_SIZE;
+      wrapped = true;
     }
-  } else {
-    const minX = Math.max(
-      0,
-      Math.floor(
-        (mower.position.x - huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING,
-      ) - 1,
-    );
-    const maxX = Math.min(
-      grassPerSide - 1,
-      Math.floor(
-        (mower.position.x + huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING,
-      ) + 1,
-    );
-    const minZ = Math.max(
-      0,
-      Math.floor(
-        (mower.position.z - huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING,
-      ) - 1,
-    );
-    const maxZ = Math.min(
-      grassPerSide - 1,
-      Math.floor(
-        (mower.position.z + huidigMowerRadius + MAP_HALF_SIZE) / GRASS_SPACING,
-      ) + 1,
-    );
-
-    for (let x = minX; x <= maxX; x++) {
-      const rowOffset = x * grassPerSide;
-      for (let z = minZ; z <= maxZ; z++) {
-        const i = rowOffset + z;
-        const g = grassData[i];
-        if (g.cut) continue;
-        const dx = g.x - mower.position.x;
-        const dz = g.z - mower.position.z;
-        if (dx * dx + dz * dz < maaierRadiusSq) {
-          if (cutGrassAtIndex(i, now)) {
-            matrixUpdateNodig = true;
-          }
-        }
+    if (g.x > mower.position.x + MAP_HALF_SIZE) {
+      g.x -= MAP_SIZE;
+      wrapped = true;
+    }
+    if (g.z < mower.position.z - MAP_HALF_SIZE) {
+      g.z += MAP_SIZE;
+      wrapped = true;
+    }
+    if (g.z > mower.position.z + MAP_HALF_SIZE) {
+      g.z -= MAP_SIZE;
+      wrapped = true;
+    }
+    if (wrapped) {
+      g.cut = false;
+      g.cutTime = 0;
+      g.regrowAt = 0;
+      grassDummy.position.set(g.x, GRASS_VISIBLE_Y, g.z);
+      grassDummy.updateMatrix();
+      grassMesh.setMatrixAt(i, grassDummy.matrix);
+      matrixUpdateNodig = true;
+    }
+    const dx = g.x - mower.position.x;
+    const dz = g.z - mower.position.z;
+    if (dx * dx + dz * dz < maaierRadiusSq) {
+      if (cutGrassAtIndex(i, now)) {
+        matrixUpdateNodig = true;
       }
     }
   }
@@ -921,9 +1576,8 @@ if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
 
 setInterval(() => window.save(), 5000);
 window.updateUI();
-mower.material.color.set(alleSkinKleuren[huidigeSkin] || 0xff0000);
+window.applySkinVisual(huidigeSkin);
 scene.background = new THREE.Color(
   lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
 );
 animate();
-
