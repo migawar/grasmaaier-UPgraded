@@ -21,14 +21,15 @@ let geld = 0,
 let diamanten = 0,
   shopUpgradeLevel = 0,
   shopUpgradePrijs = 1;
-let trofeeën = 0,
-  geclaimdeTrofeeën = 0;
+let trofeeen = 0,
+  geclaimdeTrofeeen = 0;
 const BASE_GRASS_VALUE = 0.003;
 const VALUE_UPGRADE_STEP = 0.0002;
 const EARN_MULTIPLIER = 0.3;
 const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
 const GRASSPASS_DIAMANT_REWARD = 1;
+const RAD_BASIS_KOST = 2;
 let grasWaarde = BASE_GRASS_VALUE,
   huidigeSnelheid = BASE_SPEED,
   huidigMowerRadius = 1.3;
@@ -47,6 +48,8 @@ let regrowDelay = 8000,
 let verdienMultiplier = 1;
 let totaalSpeeltijdSec = 0;
 let lichtKleur = "default";
+let radDraaiCount = 0;
+let radIsSpinning = false;
 
 const maanden = [
   "JANUARI",
@@ -106,7 +109,7 @@ window.genereerMissie = (isEvent = false) => {
   const types = [
     { id: "p", d: 120, t: "SPEEL 120 SECONDEN" },
     { id: "u", d: 5, t: "KOOP 5 UPGRADES" },
-    { id: "v", d: 500, t: "VERDIEN $500" },
+    { id: "v", d: 120, t: "VERDIEN $120" },
   ];
   const gekozen = types[Math.floor(Math.random() * types.length)];
   const lvl = isEvent ? eventLevel : gpLevel;
@@ -144,10 +147,10 @@ ui.innerHTML = `
     <button onclick="window.openSettings()" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:white; border:3px solid white; padding:10px 30px; border-radius:15px; font-size:20px; cursor:pointer; pointer-events:auto; font-family:Impact;">INSTELLINGEN</button>
     <button onclick="window.openShop()" style="position:absolute; bottom:140px; left:25px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
     <div id="upgradeMenu" style="position:absolute; top:50%; left:20px; transform:translateY(-50%); display:flex; flex-direction:column; gap:12px; pointer-events:auto;"></div>
-    <button id="gpBtn" onclick="window.openGP()" style="position:absolute; bottom:25px; left:25px; background:linear-gradient(to bottom, #f1c40f, #f39c12); color:white; border:5px solid white; padding:25px 50px; border-radius:20px; font-size:32px; cursor:pointer; pointer-events:auto; font-family:Impact;">⭐ GRASSPASS</button>
+    <button id="gpBtn" onclick="window.openGP()" style="position:absolute; bottom:25px; left:25px; background:linear-gradient(to bottom, #f1c40f, #f39c12); color:white; border:5px solid white; padding:25px 50px; border-radius:20px; font-size:32px; cursor:pointer; pointer-events:auto; font-family:Impact;">GRASSPASS</button>
     <div style="position:absolute; bottom:25px; right:25px; display:flex; flex-direction:column; gap:10px; align-items:flex-end; pointer-events:auto;">
-        <button onclick="window.openCheat()" style="background:#e74c3c; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">🔑 REDEEM CODE</button>
-        <button id="eventBtn" onclick="window.openEvent()" style="background:#9b59b6; color:white; border:5px solid white; padding:20px 45px; border-radius:20px; font-size:24px; cursor:pointer; font-family:Impact;">📅 EVENT</button>
+        <button onclick="window.openCheat()" style="background:#e74c3c; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">REDEEM CODE</button>
+        <button id="eventBtn" onclick="window.openEvent()" style="background:#9b59b6; color:white; border:5px solid white; padding:20px 45px; border-radius:20px; font-size:24px; cursor:pointer; font-family:Impact;">EVENT</button>
     </div>
     <div id="saveToast" style="position:absolute; bottom:10px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,0.5); font-size:12px; opacity:0; transition:0.5s;">GAME OPGESLAGEN...</div>
 `;
@@ -161,11 +164,13 @@ window.updateUI = () => {
   document.getElementById("geldDisp").innerText =
     `$ ${geld.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   document.getElementById("diamantDisp").innerText =
-    `💎 DIAMANTEN: ${diamanten.toLocaleString()}`;
-  trofeeën = Math.floor(totaalVerdiend / 100000);
+    `DIAMANTEN: ${diamanten.toLocaleString()}`;
+  trofeeen = Math.floor(totaalVerdiend / 100000);
   document.getElementById("trofeeDisp").innerHTML =
-    `<div style="color:#f1c40f; font-size:45px;">🏆 ${trofeeën}</div>
-        <button onclick="window.openTrofee()" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEËNPAD</button>`;
+    `<div style="color:#f1c40f; font-size:45px;">TROFEEEN: ${trofeeen}</div>
+        <button id="trofeePadBtn" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEENPAD</button>`;
+  const trofeePadBtn = document.getElementById("trofeePadBtn");
+  if (trofeePadBtn) trofeePadBtn.onclick = () => window.openTrofee();
 
   const isMax = (t) =>
     t === "r"
@@ -182,7 +187,7 @@ window.updateUI = () => {
         <button onclick="window.koop('r')" style="padding:15px; border:3px solid; border-radius:12px; font-size:22px; font-family:Impact; ${btnStyle("r")}">RADIUS: ${isMax("r") ? "MAX" : "$" + prijsRadius.toFixed(0)}</button>
         <button onclick="window.koop('s')" style="padding:15px; border:3px solid; border-radius:12px; font-size:22px; font-family:Impact; ${btnStyle("s")}">SPEED: ${isMax("s") ? "MAX" : "$" + prijsSnelheid.toFixed(0)}</button>
         <button onclick="window.koop('w')" style="padding:15px; border:3px solid; border-radius:12px; font-size:22px; font-family:Impact; ${btnStyle("w")}">VALUE: ${isMax("w") ? "MAX" : "$" + prijsWaarde.toFixed(0)}</button>
-        <button onclick="window.openSkins()" style="padding:12px; background:#3498db; color:white; border:3px solid white; border-radius:12px; cursor:pointer; font-size:20px; font-family:Impact; margin-top:20px;">👕 SKINS</button>`;
+        <button onclick="window.openSkins()" style="padding:12px; background:#3498db; color:white; border:3px solid white; border-radius:12px; cursor:pointer; font-size:20px; font-family:Impact; margin-top:20px;"> SKINS</button>`;
 
   if (
     actieveOpdracht &&
@@ -199,24 +204,25 @@ window.updateUI = () => {
   document.getElementById("gpBtn").style.border = rewardKlaar
     ? "8px solid #2ecc71"
     : "5px solid white";
-  document.getElementById("eventBtn").style.background = eventRewardKlaar
-    ? "#2ecc71"
-    : "#9b59b6";
+  document.getElementById("eventBtn").style.background = "#9b59b6";
+  document.getElementById("eventBtn").style.border = eventRewardKlaar
+    ? "8px solid #2ecc71"
+    : "5px solid white";
 };
 
 // --- 5. OVERIGE FUNCTIES ---
 window.openTrofee = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">🏆 TROFEEËNPAD</h1><p style="margin-bottom:20px;">VERDIEN $100.000 VOOR EEN  TROFEE</p>`;
+  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">TROFEEENPAD</h1><p style="margin-bottom:20px;">VERDIEN $100.000 VOOR EEN  TROFEE</p>`;
   for (let i = 1; i <= 10; i++) {
-    let geclaimd = i <= geclaimdeTrofeeën,
-      kan = i <= trofeeën && !geclaimd;
+    let geclaimd = i <= geclaimdeTrofeeen,
+      kan = i <= trofeeen && !geclaimd;
     let belBedrag = i * 7500,
       bel = i === 10 ? "BLUE SKIN" : `$${belBedrag.toLocaleString()}`;
     h += `<div style="padding:20px; margin:10px; background:#222; border-radius:15px; display:flex; justify-content:space-between; align-items:center; border:3px solid ${geclaimd ? "#2ecc71" : kan ? "#f1c40f" : "#444"};">
             <div style="text-align:left;"><div style="font-size:24px;">TROFEE ${i}</div><div style="color:#aaa;">BELONING: ${bel}</div></div>
-            ${geclaimd ? "✅" : kan ? `<button onclick="window.claimT(${i})" style="background:#2ecc71; color:white; border:none; padding:12px 25px; border-radius:10px; cursor:pointer; font-family:Impact; font-size:18px;">CLAIM</button>` : "🔒"}
+            ${geclaimd ? "CLAIMED" : kan ? `<button onclick="window.claimT(${i})" style="background:#2ecc71; color:white; border:none; padding:12px 25px; border-radius:10px; cursor:pointer; font-family:Impact; font-size:18px;">CLAIM</button>` : "LOCKED"}
         </div>`;
   }
   overlay.innerHTML =
@@ -225,8 +231,8 @@ window.openTrofee = () => {
 };
 
 window.claimT = (i) => {
-  if (i === geclaimdeTrofeeën + 1) {
-    geclaimdeTrofeeën++;
+  if (i === geclaimdeTrofeeen + 1) {
+    geclaimdeTrofeeen++;
     if (i === 10) {
       ontgrendeldeSkins.push("BLUE");
       alert("LEGENDARISCH!");
@@ -246,6 +252,7 @@ window.openShop = () => {
   if (!Number.isFinite(shopUpgradePrijs) || shopUpgradePrijs < 1)
     shopUpgradePrijs = 1;
   const volgendeMulti = (verdienMultiplier * SHOP_MULTIPLIER_STEP).toFixed(2);
+  const radKost = window.getRadKost();
   overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px;">
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
         <p style="font-size:24px; margin:8px 0; color:#2ecc71;">Geld: $${geld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
@@ -253,6 +260,12 @@ window.openShop = () => {
         <div style="width:100%; padding:14px; background:#1f2937; color:#93c5fd; border:3px solid #334155; border-radius:14px; font-family:Impact; font-size:22px; margin-bottom:12px;">DIAMANTEN KRIJG JE VIA GRASS PASS</div>
         <button onclick="window.koopShopUpgrade()" style="width:100%; padding:18px; background:${diamanten >= shopUpgradePrijs ? "#27ae60" : "#555"}; color:white; border:3px solid white; border-radius:14px; cursor:${diamanten >= shopUpgradePrijs ? "pointer" : "default"}; font-family:Impact; font-size:25px;">VERDIENSTEN x1.1 (${shopUpgradePrijs}D)</button>
         <p style="font-size:22px; color:#ccc; margin-top:18px;">Huidig: x${verdienMultiplier.toFixed(2)} | Volgend: x${volgendeMulti}</p>
+        <div style="margin-top:22px; padding:16px; background:#2d1f3a; border:3px solid #8e44ad; border-radius:14px;">
+          <div style="font-size:26px; color:#d2b4de; margin-bottom:8px;"> LUCKY RAD</div>
+          <p style="font-size:20px; margin:0 0 12px 0; color:#e8daef;">Beloningen groeien geleidelijk met je progressie.</p>
+          <button onclick="window.draaiRad()" style="width:100%; padding:16px; background:${diamanten >= radKost ? "#8e44ad" : "#555"}; color:white; border:3px solid white; border-radius:12px; cursor:${diamanten >= radKost ? "pointer" : "default"}; font-family:Impact; font-size:24px;">DRAAI RAD (${radKost}D)</button>
+          <p style="font-size:18px; color:#d7bde2; margin:10px 0 0 0;">Mogelijke rewards: Geld, Diamanten, Radius/Speed/Value upgrade</p>
+        </div>
         <button onclick="window.sluit()" style="margin-top:16px; padding:14px 50px; background:#5dade2; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
     </div>`;
 };
@@ -274,14 +287,167 @@ window.koopShopUpgrade = () => {
   window.openShop();
 };
 
+window.getRadProgressFactor = () => {
+  const verdienProgress = Math.log10(1 + totaalVerdiend / 5000);
+  const draaiProgress = radDraaiCount * 0.015;
+  return 1 + verdienProgress + draaiProgress;
+};
+
+window.getRadKost = () =>
+  Math.max(1, Math.floor(RAD_BASIS_KOST + radDraaiCount * 0.18));
+
+window.geefGratisUpgrade = (type) => {
+  if (type === "r" && countRadius < MAX_RADIUS) {
+    countRadius++;
+    huidigMowerRadius += 0.3;
+    totaalUpgrades++;
+    return true;
+  }
+  if (type === "s" && countSnelheid < MAX_OTHER) {
+    countSnelheid++;
+    huidigeSnelheid += 0.02;
+    totaalUpgrades++;
+    return true;
+  }
+  if (type === "w" && countWaarde < MAX_OTHER) {
+    countWaarde++;
+    grasWaarde = BASE_GRASS_VALUE + countWaarde * VALUE_UPGRADE_STEP;
+    totaalUpgrades++;
+    return true;
+  }
+  return false;
+};
+
+window.kiesRadBeloning = () => {
+  const factor = window.getRadProgressFactor();
+  const geldKlein = Math.round(120 * factor);
+  const geldMidden = Math.round(300 * factor);
+  const geldGroot = Math.round(700 * factor);
+  const diamantKlein = Math.max(1, Math.floor(1 + factor * 0.35));
+  const diamantGroot = Math.max(2, Math.floor(2 + factor * 0.5));
+  const pool = [
+    { weight: 32, type: "geld", amount: geldKlein, text: `$${geldKlein.toLocaleString()} geld` },
+    { weight: 22, type: "geld", amount: geldMidden, text: `$${geldMidden.toLocaleString()} geld` },
+    { weight: 9, type: "geld", amount: geldGroot, text: `$${geldGroot.toLocaleString()} geld` },
+    { weight: 18, type: "diamant", amount: diamantKlein, text: `${diamantKlein} diamant(en)` },
+    { weight: 8, type: "diamant", amount: diamantGroot, text: `${diamantGroot} diamant(en)` },
+    { weight: 5, type: "upgrade", upgradeType: "r", text: "Gratis Radius Upgrade" },
+    { weight: 3, type: "upgrade", upgradeType: "s", text: "Gratis Speed Upgrade" },
+    { weight: 3, type: "upgrade", upgradeType: "w", text: "Gratis Value Upgrade" },
+  ];
+  const totaal = pool.reduce((sum, p) => sum + p.weight, 0);
+  let roll = Math.random() * totaal;
+  for (const item of pool) {
+    roll -= item.weight;
+    if (roll <= 0) return item;
+  }
+  return pool[0];
+};
+
+window.pasRadBeloningToe = (beloning) => {
+  if (beloning.type === "geld") {
+    geld += beloning.amount;
+    return `Je won ${beloning.text}!`;
+  }
+  if (beloning.type === "diamant") {
+    diamanten += beloning.amount;
+    return `Je won ${beloning.text}!`;
+  }
+  if (beloning.type === "upgrade") {
+    const gelukt = window.geefGratisUpgrade(beloning.upgradeType);
+    if (gelukt) return `Je won: ${beloning.text}!`;
+    const fallback = Math.round(250 * window.getRadProgressFactor());
+    geld += fallback;
+    return `Upgrade was max, dus je kreeg $${fallback.toLocaleString()} geld!`;
+  }
+  return "Geen beloning.";
+};
+
+window.startRadAnimatie = (beloning) => {
+  const opties = [
+    "Kleine geldbonus",
+    "Middel geldbonus",
+    "Grote geldbonus",
+    "Diamanten bonus",
+    "Gratis Radius Upgrade",
+    "Gratis Speed Upgrade",
+    "Gratis Value Upgrade",
+  ];
+  const eindTekst =
+    beloning.type === "upgrade"
+      ? beloning.text
+      : `Je won ${beloning.text}`;
+  const animatieLijst = [...opties, eindTekst];
+  const totaalTicks = 26 + Math.floor(Math.random() * 9);
+  let tick = 0;
+  let delay = 65;
+  let index = 0;
+
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:55px; border:8px solid #8e44ad; border-radius:30px; text-align:center; min-width:620px;">
+      <h1 style="color:#d2b4de; font-size:58px; margin:0 0 10px 0;">LUCKY RAD</h1>
+      <p style="font-size:22px; color:#ddd; margin:0 0 20px 0;">Het rad draait...</p>
+      <div style="width:100%; background:#2d1f3a; border:4px solid white; border-radius:16px; padding:18px 20px; margin-bottom:20px;">
+        <div id="radRollText" style="font-size:34px; color:#f5eef8; min-height:45px;">...</div>
+      </div>
+      <div id="radResultText" style="font-size:24px; color:#85c1e9; min-height:34px;">Even wachten...</div>
+      <button id="radTerugBtn" onclick="window.openShop()" style="margin-top:18px; padding:14px 44px; background:#5dade2; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer; opacity:0.4;" disabled>TERUG NAAR SHOP</button>
+    </div>`;
+
+  const rollEl = document.getElementById("radRollText");
+  const resultEl = document.getElementById("radResultText");
+  const terugBtn = document.getElementById("radTerugBtn");
+
+  const step = () => {
+    if (!rollEl || !resultEl || !terugBtn) {
+      radIsSpinning = false;
+      return;
+    }
+    tick++;
+    index = (index + 1 + Math.floor(Math.random() * 2)) % animatieLijst.length;
+    rollEl.innerText = animatieLijst[index];
+
+    if (tick < totaalTicks) {
+      delay = Math.min(240, delay + 7);
+      setTimeout(step, delay);
+      return;
+    }
+
+    rollEl.innerText = eindTekst;
+    const bericht = window.pasRadBeloningToe(beloning);
+    resultEl.innerText = bericht;
+    window.updateUI();
+    terugBtn.disabled = false;
+    terugBtn.style.opacity = "1";
+    radIsSpinning = false;
+  };
+
+  step();
+};
+
+window.draaiRad = () => {
+  if (radIsSpinning) return;
+  const kost = window.getRadKost();
+  if (diamanten < kost) {
+    alert(`Je hebt ${kost} diamanten nodig om te draaien.`);
+    return;
+  }
+  radIsSpinning = true;
+  diamanten -= kost;
+  radDraaiCount++;
+  const beloning = window.kiesRadBeloning();
+  window.startRadAnimatie(beloning);
+};
+
 window.openSkins = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;">👕 SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
+  let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
   ["RED", "BLUE", ...maanden].forEach((s) => {
     const ok = ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
-    h += `<button onclick="${ok ? `window.setSkin('${s}')` : ""}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;">${ok ? s : "🔒"}</button>`;
+    h += `<button onclick="${ok ? `window.setSkin('${s}')` : ""}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;">${ok ? s : "LOCKED"}</button>`;
   });
   overlay.innerHTML =
     h +
@@ -301,7 +467,7 @@ window.openGP = () => {
     actieveOpdracht.d,
   );
   overlay.innerHTML = `<div style="background:#111; padding:60px; border:10px solid #f1c40f; border-radius:40px; text-align:center;">
-        <h1 style="color:#f1c40f; font-size:70px; margin-bottom:5px;">⭐ GRASS PASS</h1>
+        <h1 style="color:#f1c40f; font-size:70px; margin-bottom:5px;"> GRASS PASS</h1>
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">LEVEL ${gpLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${actieveOpdracht.t}</p>
         <div style="width:500px; height:40px; background:#333; border:4px solid white; margin:30px auto; border-radius:20px; overflow:hidden;"><div style="width:${(v / actieveOpdracht.d) * 100}%; height:100%; background:#f1c40f;"></div></div>
@@ -328,7 +494,7 @@ window.openEvent = () => {
     eventOpdracht.d,
   );
   overlay.innerHTML = `<div style="background:#111; padding:60px; border:10px solid #9b59b6; border-radius:40px; text-align:center;">
-        <h1 style="color:#9b59b6; font-size:70px; margin-bottom:5px;">📅 ${huidigeMaandNaam}</h1>
+        <h1 style="color:#9b59b6; font-size:70px; margin-bottom:5px;"> ${huidigeMaandNaam}</h1>
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">EVENT LEVEL ${eventLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${eventOpdracht.t}</p>
         <p style="font-size:22px; color:#ddd; margin-top:6px;">SKIN WORDT ONTGRENDELD OP LEVEL 100</p>
@@ -369,7 +535,7 @@ window.save = (silent = false) => {
     totaalVerdiend,
     totaalGemaaid,
     totaalUpgrades,
-    geclaimdeTrofeeën,
+    geclaimdeTrofeeen,
     grasWaarde,
     huidigeSnelheid,
     huidigMowerRadius,
@@ -395,6 +561,7 @@ window.save = (silent = false) => {
     verdienMultiplier,
     totaalSpeeltijdSec,
     lichtKleur,
+    radDraaiCount,
   };
   localStorage.setItem("grassMasterSaveV2", JSON.stringify(data));
 
@@ -415,7 +582,10 @@ window.load = () => {
   totaalVerdiend = d.totaalVerdiend;
   totaalGemaaid = d.totaalGemaaid;
   totaalUpgrades = d.totaalUpgrades;
-  geclaimdeTrofeeën = d.geclaimdeTrofeeën;
+  geclaimdeTrofeeen =
+    d.geclaimdeTrofeeen ?? d.geclaimdeTrofeeën ?? d["geclaimdeTrofeeÃ«n"] ?? 0;
+  if (!Number.isFinite(geclaimdeTrofeeen) || geclaimdeTrofeeen < 0)
+    geclaimdeTrofeeen = 0;
   grasWaarde = d.grasWaarde;
   huidigeSnelheid = d.huidigeSnelheid;
   huidigMowerRadius = d.huidigMowerRadius;
@@ -443,6 +613,7 @@ window.load = () => {
     d.verdienMultiplier ?? Math.pow(SHOP_MULTIPLIER_STEP, shopUpgradeLevel);
   totaalSpeeltijdSec = d.totaalSpeeltijdSec ?? 0;
   lichtKleur = d.lichtKleur === "blue" ? "hemelsblauw" : (d.lichtKleur ?? "default");
+  radDraaiCount = d.radDraaiCount ?? 0;
 
   return true;
 };
@@ -456,7 +627,7 @@ window.openResetConfirm = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   overlay.innerHTML = `<div style="background:#7f1d1d; padding:60px; border:10px solid white; border-radius:40px; text-align:center;">
-        <h1 style="font-size:80px; color:white; margin-bottom:10px;">🛑 STOP!</h1>
+        <h1 style="font-size:80px; color:white; margin-bottom:10px;"> STOP!</h1>
         <p style="font-size:30px; color:white; margin-bottom:40px;">Weet je het heel zeker? <br><b>Al je voortgang wordt gewist.</b></p>
         <button onclick="window.finalReset()" style="width:450px; padding:25px; background:white; color:#7f1d1d; font-family:Impact; font-size:32px; cursor:pointer; border:none; border-radius:20px; margin-bottom:15px;">JA, WIS ALLES!</button>
         <button onclick="window.openSettings()" style="width:450px; padding:20px; background:rgba(0,0,0,0.3); color:white; font-family:Impact; font-size:24px; cursor:pointer; border:2px solid white; border-radius:20px;">NEE, TERUG</button></div>`;
@@ -470,7 +641,7 @@ window.openSettings = () => {
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="gameMode=(gameMode==='classic'?'creative':'classic'); window.openSettings();" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
-        <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;">⚠️ RESET GAME ⚠️</button><br>
+        <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;"> RESET GAME </button><br>
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
 
@@ -755,3 +926,4 @@ scene.background = new THREE.Color(
   lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
 );
 animate();
+
