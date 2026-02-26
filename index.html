@@ -1,160 +1,34 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-<meta charset="UTF-8">
-<title>3D Game Grasmaaier – Daan & Lauran’s Upgrade</title>
-<link rel="stylesheet" href="style.css">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <title>Gratis 3D Grasmaaier Game – Speel Online in je Browser</title>
+
+    <meta name="description" content="Speel gratis de 3D Grasmaaier Game online in je browser. Verzamel punten, upgrade je grasmaaier en ontdek nieuwe levels in deze unieke browser game.">
+    <meta name="keywords" content="3D grasmaaier game, gratis browser game, online spel, grasmaaier spel, 3D game spelen">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="index, follow">
+    <meta name="google-site-verification" content="m-j45rggfmvuf3JyFr3HnhkDGIP_EIcQt7jdydZz0GY" />
+
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
-  }
-}
-</script>
-
-<script type="module" src="script.js"></script>
-
-<script type="module">
-
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
-  authDomain: "grasmaaier-accaunts.firebaseapp.com",
-  projectId: "grasmaaier-accaunts",
-  storageBucket: "grasmaaier-accaunts.firebasestorage.app",
-  messagingSenderId: "562259586390",
-  appId: "1:562259586390:web:2c89f72aef6b61f281faf7"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth();
-const provider = new GoogleAuthProvider();
-const db = getFirestore();
-
-let currentUser = null;
-
-window.login = async function() {
-  const result = await signInWithPopup(auth, provider);
-  const user = result.user;
-
-  await setDoc(doc(db, "users", user.uid), {
-    name: user.displayName,
-    email: user.email,
-    photo: user.photoURL,
-    lastLogin: new Date()
-  }, { merge: true });
-
-  alert("Welkom " + user.displayName);
-  window.openSettings();
-};
-
-window.logout = async function() {
-  await signOut(auth);
-  alert("Uitgelogd");
-  window.openSettings();
-};
-
-onAuthStateChanged(auth, (user) => {
-  currentUser = user;
-  console.log(user ? "Ingelogd als: " + user.displayName : "Niet ingelogd");
-});
-
-window.openSettings = function() {
-
-  const overlay = document.getElementById("overlayGlobal");
-
-  overlay.style.left = "0";
-  overlay.style.pointerEvents = "auto";
-
-  let userInfo = "";
-  let loginBtn = "";
-  let logoutBtn = "";
-
-  if (currentUser) {
-    userInfo = `
-      <div style="margin-bottom:20px;">
-        <img src="${currentUser.photoURL}" 
-             style="width:80px; border-radius:50%; border:4px solid white;"><br>
-        <span style="font-size:22px;">${currentUser.displayName}</span>
-      </div>
-    `;
-
-    logoutBtn = `
-      <button onclick="window.logout()" 
-        style="width:100%; padding:18px;
-        background:linear-gradient(to bottom, #e74c3c, #c0392b);
-        color:white; border:4px solid white;
-        border-radius:15px; cursor:pointer;
-        font-family:Impact; font-size:26px;">
-        UITLOGGEN
-      </button>
-    `;
-
-  } else {
-
-    loginBtn = `
-      <button onclick="window.login()" 
-        style="width:100%; padding:18px;
-        background:linear-gradient(to bottom, #2ecc71, #27ae60);
-        color:white; border:4px solid white;
-        border-radius:15px; cursor:pointer;
-        font-family:Impact; font-size:26px;">
-        LOGIN MET GOOGLE
-      </button>
-    `;
-  }
-
-  overlay.innerHTML = `
-    <div style="background:#111; padding:50px; 
-    border:8px solid #3498db; border-radius:30px; 
-    text-align:center; min-width:560px; color:white; font-family:Impact;">
-
-      <h1 style="color:#5dade2; font-size:60px;">INSTELLINGEN</h1>
-
-      ${userInfo}
-      ${loginBtn}
-      ${logoutBtn}
-
-      <button onclick="window.toggleGameMode()" 
-        style="width:100%; margin-top:25px; padding:18px;
-        background:#9b59b6; color:white;
-        border:4px solid white; border-radius:15px;
-        cursor:pointer; font-family:Impact; font-size:24px;">
-        WISSEL GAME MODE
-      </button>
-
-      <button onclick="overlay.style.left='-100%'; overlay.style.pointerEvents='none';" 
-        style="margin-top:25px; padding:15px 50px;
-        background:#3498db; color:white;
-        border:none; border-radius:12px;
-        font-family:Impact; font-size:24px; cursor:pointer;">
-        SLUITEN
-      </button>
-
+    <!-- VOLLEDIG ONZICHTBAAR SEO-BLOK -->
+    <div class="seo-hidden">
+        <h1>Gratis 3D Grasmaaier Game Online</h1>
+        <p>
+            Speel gratis de 3D Grasmaaier Game in je browser. Verzamel punten, upgrade je grasmaaier en ontdek nieuwe levels.
+            Deze unieke 3D browser game is volledig online speelbaar zonder download.
+        </p>
     </div>
-  `;
-};
 
-</script>
-
-<div id="overlayGlobal"
-style="position:fixed; top:0; left:-100%;
-width:100%; height:100%;
-background:rgba(0,0,0,0.95);
-z-index:10000;
-transition:0.3s;
-display:flex;
-align-items:center;
-justify-content:center;">
-</div>
+    <!-- THREE.JS GAME -->
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+    <script type="module" src="script.js"></script>
 
 </body>
 </html>
