@@ -26,6 +26,7 @@ const camera = new THREE.PerspectiveCamera(
   1000,
 );
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -65,6 +66,7 @@ let regrowDelay = 8000,
   gameMode = "classic",
   creativeSpeed = 0.5,
   autoSaveOnd = false;
+let fpsMeterOnd = false;
 let verdienMultiplier = 1;
 let totaalSpeeltijdSec = 0;
 let lichtKleur = "default";
@@ -302,6 +304,7 @@ ui.innerHTML = `
     <div id="trofeeDisp" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:10px 25px; border-radius:15px; border:4px solid #f1c40f; pointer-events:auto; text-align:right;"></div>
     <div id="miniGameSlot" style="position:absolute; top:145px; right:20px; pointer-events:auto;"></div>
     <button onclick="window.openSettings()" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:white; border:3px solid white; padding:10px 30px; border-radius:15px; font-size:20px; cursor:pointer; pointer-events:auto; font-family:Impact;">INSTELLINGEN</button>
+    <div id="fpsDisp" style="position:absolute; top:72px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.78); border:3px solid #7f8c8d; color:#ecf0f1; padding:7px 14px; border-radius:12px; font-size:20px; pointer-events:none; display:none;">FPS: --</div>
     <button id="shopBtn" onclick="window.openShop()" style="position:absolute; bottom:140px; left:25px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
     <div id="upgradeMenu" style="position:absolute; top:50%; left:20px; transform:translateY(-50%); display:flex; flex-direction:column; gap:12px; pointer-events:auto;"></div>
     <button id="gpBtn" onclick="window.openGP()" style="position:absolute; bottom:25px; left:25px; background:linear-gradient(to bottom, #f1c40f, #f39c12); color:white; border:5px solid white; padding:25px 50px; border-radius:20px; font-size:32px; cursor:pointer; pointer-events:auto; font-family:Impact;">GRASSPASS</button>
@@ -332,6 +335,7 @@ window.updateUI = () => {
   setDisplay("shopBtn", !isCreative);
   setDisplay("gpBtn", !isCreative);
   setDisplay("rightPanel", !isCreative, "flex");
+  setDisplay("fpsDisp", fpsMeterOnd);
 
   if (isCreative) {
     miniGameKnopZichtbaar = false;
@@ -1044,6 +1048,16 @@ window.toggleLichtKleur = () => {
   window.openSettings();
 };
 
+window.toggleFpsMeter = () => {
+  fpsMeterOnd = !fpsMeterOnd;
+  fpsMeterFrames = 0;
+  fpsMeterLastSampleAt = performance.now();
+  const fpsEl = document.getElementById("fpsDisp");
+  if (fpsEl) fpsEl.innerText = "FPS: --";
+  window.updateUI();
+  window.openSettings();
+};
+
 window.getSaveData = () => ({
   geld,
   totaalVerdiend,
@@ -1077,6 +1091,7 @@ window.getSaveData = () => ({
   lichtKleur,
   radDraaiCount,
   creativeSpeed,
+  fpsMeterOnd,
 });
 
 window.applySaveData = (d) => {
@@ -1130,6 +1145,7 @@ window.applySaveData = (d) => {
     d.lichtKleur === "blue" ? "hemelsblauw" : (d.lichtKleur ?? "default");
   radDraaiCount = Number.isFinite(d.radDraaiCount) ? d.radDraaiCount : 0;
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
+  fpsMeterOnd = Boolean(d.fpsMeterOnd);
   return true;
 };
 
@@ -1297,6 +1313,7 @@ window.openSettings = () => {
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
+        <button onclick="window.toggleFpsMeter()" style="width:400px; padding:20px; background:${fpsMeterOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FPS METER: ${fpsMeterOnd ? "AAN" : "UIT"}</button><br>
         <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
         <button onclick="window.toggleGoogleLogin()" style="width:400px; padding:18px; background:${accountKnopKleur}; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">${accountKnopTekst}</button><br>
         <button onclick="window.openInfoPage()" style="width:400px; padding:16px; background:#1f2937; color:#93c5fd; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">INFO PAGINA</button><br>
@@ -1585,6 +1602,8 @@ const GRASS_HIDDEN_Y = -10;
 const CAMERA_OFFSET = new THREE.Vector3(0, 5, 7);
 const GROUND_COLOR = 0x2f8a2f;
 const GROUND_TILE_SIZE = MAP_SIZE;
+const GRID_ORIGIN = -MAP_HALF_SIZE;
+const INV_GRASS_SPACING = 1 / GRASS_SPACING;
 
 // Grond gelijk aan het actieve grasveld.
 const ground = new THREE.Mesh(
@@ -1615,6 +1634,8 @@ const UI_UPDATE_INTERVAL_MS = 100;
 let uiDirty = false;
 let lastUiUpdate = 0;
 let lastFrameNow = Date.now();
+let fpsMeterFrames = 0;
+let fpsMeterLastSampleAt = performance.now();
 let grassIndex = 0;
 for (let x = 0; x < grassPerSide; x++) {
   for (let z = 0; z < grassPerSide; z++) {
@@ -1642,6 +1663,7 @@ window.onkeyup = (e) => (keys[e.key.toLowerCase()] = false);
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
@@ -1675,6 +1697,92 @@ function updateGroundTiles() {
   }
 }
 
+function cutGrassNearMowerClassic(now, maaierRadiusSq) {
+  const radius = huidigMowerRadius;
+  const minX = Math.max(
+    0,
+    Math.floor((mower.position.x - radius - GRID_ORIGIN) * INV_GRASS_SPACING),
+  );
+  const maxX = Math.min(
+    grassPerSide - 1,
+    Math.ceil((mower.position.x + radius - GRID_ORIGIN) * INV_GRASS_SPACING),
+  );
+  const minZ = Math.max(
+    0,
+    Math.floor((mower.position.z - radius - GRID_ORIGIN) * INV_GRASS_SPACING),
+  );
+  const maxZ = Math.min(
+    grassPerSide - 1,
+    Math.ceil((mower.position.z + radius - GRID_ORIGIN) * INV_GRASS_SPACING),
+  );
+  let matrixUpdateNodig = false;
+  for (let x = minX; x <= maxX; x++) {
+    const rowStart = x * grassPerSide;
+    for (let z = minZ; z <= maxZ; z++) {
+      const i = rowStart + z;
+      const g = grassData[i];
+      const dx = g.x - mower.position.x;
+      const dz = g.z - mower.position.z;
+      if (dx * dx + dz * dz < maaierRadiusSq && cutGrassAtIndex(i, now)) {
+        matrixUpdateNodig = true;
+      }
+    }
+  }
+  return matrixUpdateNodig;
+}
+
+function updateCreativeGrass(now, maaierRadiusSq) {
+  let matrixUpdateNodig = false;
+  for (let i = 0; i < totalGrass; i++) {
+    const g = grassData[i];
+    let wrapped = false;
+    if (g.x < mower.position.x - MAP_HALF_SIZE) {
+      g.x += MAP_SIZE;
+      wrapped = true;
+    }
+    if (g.x > mower.position.x + MAP_HALF_SIZE) {
+      g.x -= MAP_SIZE;
+      wrapped = true;
+    }
+    if (g.z < mower.position.z - MAP_HALF_SIZE) {
+      g.z += MAP_SIZE;
+      wrapped = true;
+    }
+    if (g.z > mower.position.z + MAP_HALF_SIZE) {
+      g.z -= MAP_SIZE;
+      wrapped = true;
+    }
+    if (wrapped) {
+      g.cut = false;
+      g.cutTime = 0;
+      g.regrowAt = 0;
+      grassDummy.position.set(g.x, GRASS_VISIBLE_Y, g.z);
+      grassDummy.updateMatrix();
+      grassMesh.setMatrixAt(i, grassDummy.matrix);
+      matrixUpdateNodig = true;
+    }
+    const dx = g.x - mower.position.x;
+    const dz = g.z - mower.position.z;
+    if (dx * dx + dz * dz < maaierRadiusSq && cutGrassAtIndex(i, now)) {
+      matrixUpdateNodig = true;
+    }
+  }
+  return matrixUpdateNodig;
+}
+
+function updateFpsMeter() {
+  if (!fpsMeterOnd) return;
+  fpsMeterFrames++;
+  const nowPerf = performance.now();
+  const elapsed = nowPerf - fpsMeterLastSampleAt;
+  if (elapsed < 500) return;
+  const fps = Math.round((fpsMeterFrames * 1000) / elapsed);
+  fpsMeterFrames = 0;
+  fpsMeterLastSampleAt = nowPerf;
+  const fpsEl = document.getElementById("fpsDisp");
+  if (fpsEl) fpsEl.innerText = `FPS: ${fps}`;
+}
+
 function animate() {
   requestAnimationFrame(animate);
   let s = gameMode === "creative" ? creativeSpeed : huidigeSnelheid;
@@ -1703,48 +1811,13 @@ function animate() {
     blueAuraPulse += deltaSec * 4.6;
     mowerBlueAuraLight.intensity = 1.05 + Math.sin(blueAuraPulse) * 0.2;
   }
+  updateFpsMeter();
   updateGroundTiles();
   const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
-  let matrixUpdateNodig = false;
-
-  for (let i = 0; i < totalGrass; i++) {
-    const g = grassData[i];
-    let wrapped = false;
-    if (gameMode === "creative") {
-      if (g.x < mower.position.x - MAP_HALF_SIZE) {
-        g.x += MAP_SIZE;
-        wrapped = true;
-      }
-      if (g.x > mower.position.x + MAP_HALF_SIZE) {
-        g.x -= MAP_SIZE;
-        wrapped = true;
-      }
-      if (g.z < mower.position.z - MAP_HALF_SIZE) {
-        g.z += MAP_SIZE;
-        wrapped = true;
-      }
-      if (g.z > mower.position.z + MAP_HALF_SIZE) {
-        g.z -= MAP_SIZE;
-        wrapped = true;
-      }
-    }
-    if (wrapped) {
-      g.cut = false;
-      g.cutTime = 0;
-      g.regrowAt = 0;
-      grassDummy.position.set(g.x, GRASS_VISIBLE_Y, g.z);
-      grassDummy.updateMatrix();
-      grassMesh.setMatrixAt(i, grassDummy.matrix);
-      matrixUpdateNodig = true;
-    }
-    const dx = g.x - mower.position.x;
-    const dz = g.z - mower.position.z;
-    if (dx * dx + dz * dz < maaierRadiusSq) {
-      if (cutGrassAtIndex(i, now)) {
-        matrixUpdateNodig = true;
-      }
-    }
-  }
+  let matrixUpdateNodig =
+    gameMode === "creative"
+      ? updateCreativeGrass(now, maaierRadiusSq)
+      : cutGrassNearMowerClassic(now, maaierRadiusSq);
 
   while (regrowQueueHead < regrowQueue.length) {
     const i = regrowQueue[regrowQueueHead];
