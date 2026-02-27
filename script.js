@@ -1,4 +1,20 @@
 import * as THREE from "three";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  GoogleAuthProvider,
+  getAuth,
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut,
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
+  deleteDoc,
+  doc,
+  getDoc,
+  getFirestore,
+  serverTimestamp,
+  setDoc,
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 // --- 1. ENGINE SETUP ---
 const scene = new THREE.Scene();
@@ -68,6 +84,23 @@ let miniGameRonde = 1;
 let miniGameKnopZichtbaarTot = 0;
 let basicStateVoorCreative = null;
 const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
+const LOCAL_SAVE_KEY = "grassMasterSaveV2";
+const FIREBASE_SAVE_COLLECTION = "saves";
+const firebaseConfig = {
+  apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
+  authDomain: "grasmaaier-accaunts.firebaseapp.com",
+  projectId: "grasmaaier-accaunts",
+  storageBucket: "grasmaaier-accaunts.firebasestorage.app",
+  messagingSenderId: "562259586390",
+  appId: "1:562259586390:web:2c89f72aef6b61f281faf7",
+  measurementId: "G-8G03B1Y9X1",
+};
+
+let firebaseApp = null;
+let firebaseAuth = null;
+let firebaseDb = null;
+let googleProvider = null;
+let ingelogdeGebruiker = null;
 
 const maanden = [
   "JANUARI",
@@ -203,6 +236,15 @@ let mowerBlueAuraLight = null;
 let blueAuraPulse = 0;
 const normalizeGameMode = (mode) =>
   mode === "creative" ? "creative" : "classic";
+const getSaveDocRef = (uid) =>
+  doc(firebaseDb, FIREBASE_SAVE_COLLECTION, String(uid));
+const getAccountLabel = () => {
+  if (!ingelogdeGebruiker) return "NIET INGELOGD";
+  if (ingelogdeGebruiker.displayName) return ingelogdeGebruiker.displayName;
+  if (ingelogdeGebruiker.email)
+    return ingelogdeGebruiker.email.split("@")[0].toUpperCase();
+  return "GOOGLE ACCOUNT";
+};
 
 // --- 3. CORE LOGICA ---
 window.getStat = (id) => {
@@ -391,6 +433,7 @@ window.applySkinVisual = (skinNaam) => {
   const basisKleur = alleSkinKleuren[skinNaam] ?? 0xff0000;
   const isRed = skinNaam === "RED";
   const isBlue = skinNaam === "BLUE";
+  const isOmgekeerd = !isRed && !isBlue;
   const override = skinVisualOverrides[skinNaam] || {};
 
   const color = override.color ?? basisKleur;
@@ -404,8 +447,14 @@ window.applySkinVisual = (skinNaam) => {
     mowerRedBlock.visible = isRed;
     mowerRedBlock.material.color.set(0xff0000);
   }
-  if (mowerDetailedModel) mowerDetailedModel.visible = !isRed;
-  if (mowerBlueKit) mowerBlueKit.visible = isBlue;
+  if (mowerDetailedModel) {
+    mowerDetailedModel.visible = !isRed;
+    mowerDetailedModel.rotation.y = isOmgekeerd ? Math.PI : 0;
+  }
+  if (mowerBlueKit) {
+    mowerBlueKit.visible = isBlue;
+    mowerBlueKit.rotation.y = isBlue ? 0 : Math.PI;
+  }
   if (mowerBlueAuraLight) mowerBlueAuraLight.visible = isBlue;
 
   mowerBodyMaterial.color.set(color);
@@ -990,126 +1039,240 @@ window.toggleLichtKleur = () => {
   window.openSettings();
 };
 
-window.save = (silent = false) => {
-  if (!autoSaveOnd && !silent) return;
-  const data = {
-    geld,
-    totaalVerdiend,
-    totaalGemaaid,
-    totaalUpgrades,
-    geclaimdeTrofeeen,
-    grasWaarde,
-    huidigeSnelheid,
-    huidigMowerRadius,
-    prijsRadius,
-    prijsSnelheid,
-    prijsWaarde,
-    countRadius,
-    countSnelheid,
-    countWaarde,
-    gpLevel,
-    eventLevel,
-    huidigeSkin,
-    ontgrendeldeSkins,
-    autoSaveOnd,
-    gameMode,
-    actieveOpdracht,
-    eventOpdracht,
-    rewardKlaar,
-    eventRewardKlaar,
-    diamanten,
-    shopUpgradeLevel,
-    shopUpgradePrijs,
-    verdienMultiplier,
-    totaalSpeeltijdSec,
-    lichtKleur,
-    radDraaiCount,
-  };
-  localStorage.setItem("grassMasterSaveV2", JSON.stringify(data));
+window.getSaveData = () => ({
+  geld,
+  totaalVerdiend,
+  totaalGemaaid,
+  totaalUpgrades,
+  geclaimdeTrofeeen,
+  grasWaarde,
+  huidigeSnelheid,
+  huidigMowerRadius,
+  prijsRadius,
+  prijsSnelheid,
+  prijsWaarde,
+  countRadius,
+  countSnelheid,
+  countWaarde,
+  gpLevel,
+  eventLevel,
+  huidigeSkin,
+  ontgrendeldeSkins,
+  autoSaveOnd,
+  gameMode,
+  actieveOpdracht,
+  eventOpdracht,
+  rewardKlaar,
+  eventRewardKlaar,
+  diamanten,
+  shopUpgradeLevel,
+  shopUpgradePrijs,
+  verdienMultiplier,
+  totaalSpeeltijdSec,
+  lichtKleur,
+  radDraaiCount,
+  creativeSpeed,
+});
 
-  if (autoSaveOnd) {
-    const t = document.getElementById("saveToast");
-    t.style.opacity = 1;
-    setTimeout(() => (t.style.opacity = 0), 1500);
-  }
-};
+window.applySaveData = (d) => {
+  if (!d || typeof d !== "object") return false;
 
-window.load = () => {
-  const saved = localStorage.getItem("grassMasterSaveV2");
-  if (!saved) return false;
-  const d = JSON.parse(saved);
-
-  // Hard overschrijven van alle variabelen
-  geld = d.geld;
-  totaalVerdiend = d.totaalVerdiend;
-  totaalGemaaid = d.totaalGemaaid;
-  totaalUpgrades = d.totaalUpgrades;
+  geld = Number.isFinite(d.geld) ? d.geld : 0;
+  totaalVerdiend = Number.isFinite(d.totaalVerdiend) ? d.totaalVerdiend : 0;
+  totaalGemaaid = Number.isFinite(d.totaalGemaaid) ? d.totaalGemaaid : 0;
+  totaalUpgrades = Number.isFinite(d.totaalUpgrades) ? d.totaalUpgrades : 0;
   geclaimdeTrofeeen =
     d.geclaimdeTrofeeen ?? d.geclaimdeTrofeeën ?? d["geclaimdeTrofeeÃ«n"] ?? 0;
   if (!Number.isFinite(geclaimdeTrofeeen) || geclaimdeTrofeeen < 0)
     geclaimdeTrofeeen = 0;
-  grasWaarde = d.grasWaarde;
-  huidigeSnelheid = d.huidigeSnelheid;
-  huidigMowerRadius = d.huidigMowerRadius;
-  prijsRadius = d.prijsRadius;
-  prijsSnelheid = d.prijsSnelheid;
-  prijsWaarde = d.prijsWaarde;
-  countRadius = d.countRadius;
-  countSnelheid = d.countSnelheid;
-  countWaarde = d.countWaarde;
+  grasWaarde = Number.isFinite(d.grasWaarde) ? d.grasWaarde : BASE_GRASS_VALUE;
+  huidigeSnelheid = Number.isFinite(d.huidigeSnelheid)
+    ? d.huidigeSnelheid
+    : BASE_SPEED;
+  huidigMowerRadius = Number.isFinite(d.huidigMowerRadius)
+    ? d.huidigMowerRadius
+    : 1.3;
+  prijsRadius = Number.isFinite(d.prijsRadius) ? d.prijsRadius : 5;
+  prijsSnelheid = Number.isFinite(d.prijsSnelheid) ? d.prijsSnelheid : 5;
+  prijsWaarde = Number.isFinite(d.prijsWaarde) ? d.prijsWaarde : 10;
+  countRadius = Number.isFinite(d.countRadius) ? d.countRadius : 0;
+  countSnelheid = Number.isFinite(d.countSnelheid) ? d.countSnelheid : 0;
+  countWaarde = Number.isFinite(d.countWaarde) ? d.countWaarde : 0;
   grasWaarde = BASE_GRASS_VALUE + countWaarde * VALUE_UPGRADE_STEP;
-  gpLevel = d.gpLevel;
-  eventLevel = d.eventLevel;
-  huidigeSkin = d.huidigeSkin;
-  ontgrendeldeSkins = d.ontgrendeldeSkins;
-  autoSaveOnd = d.autoSaveOnd;
+  gpLevel = Number.isFinite(d.gpLevel) ? d.gpLevel : 1;
+  eventLevel = Number.isFinite(d.eventLevel) ? d.eventLevel : 1;
+  huidigeSkin = d.huidigeSkin || "RED";
+  ontgrendeldeSkins =
+    Array.isArray(d.ontgrendeldeSkins) && d.ontgrendeldeSkins.length
+      ? d.ontgrendeldeSkins
+      : ["RED"];
+  autoSaveOnd = Boolean(d.autoSaveOnd);
   gameMode = normalizeGameMode(d.gameMode);
-  actieveOpdracht = d.actieveOpdracht;
-  eventOpdracht = d.eventOpdracht;
-  rewardKlaar = d.rewardKlaar;
-  eventRewardKlaar = d.eventRewardKlaar;
-  diamanten = d.diamanten ?? 0;
-  shopUpgradeLevel = d.shopUpgradeLevel ?? 0;
-  shopUpgradePrijs = d.shopUpgradePrijs ?? 1;
-  verdienMultiplier =
-    d.verdienMultiplier ?? Math.pow(SHOP_MULTIPLIER_STEP, shopUpgradeLevel);
-  totaalSpeeltijdSec = d.totaalSpeeltijdSec ?? 0;
+  actieveOpdracht = d.actieveOpdracht || null;
+  eventOpdracht = d.eventOpdracht || null;
+  rewardKlaar = Boolean(d.rewardKlaar);
+  eventRewardKlaar = Boolean(d.eventRewardKlaar);
+  diamanten = Number.isFinite(d.diamanten) ? d.diamanten : 0;
+  shopUpgradeLevel = Number.isFinite(d.shopUpgradeLevel) ? d.shopUpgradeLevel : 0;
+  shopUpgradePrijs = Number.isFinite(d.shopUpgradePrijs) ? d.shopUpgradePrijs : 1;
+  verdienMultiplier = Number.isFinite(d.verdienMultiplier)
+    ? d.verdienMultiplier
+    : Math.pow(SHOP_MULTIPLIER_STEP, shopUpgradeLevel);
+  totaalSpeeltijdSec = Number.isFinite(d.totaalSpeeltijdSec)
+    ? d.totaalSpeeltijdSec
+    : 0;
   lichtKleur =
     d.lichtKleur === "blue" ? "hemelsblauw" : (d.lichtKleur ?? "default");
-  radDraaiCount = d.radDraaiCount ?? 0;
-
+  radDraaiCount = Number.isFinite(d.radDraaiCount) ? d.radDraaiCount : 0;
+  creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   return true;
 };
 
-window.finalReset = () => {
-  localStorage.removeItem("grassMasterSaveV2");
+window.loadCloudSave = async () => {
+  if (!firebaseDb || !ingelogdeGebruiker) return false;
+  try {
+    const snap = await getDoc(getSaveDocRef(ingelogdeGebruiker.uid));
+    if (!snap.exists()) return false;
+    const geladen = window.applySaveData(snap.data());
+    if (!geladen) return false;
+    scene.background = new THREE.Color(
+      lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
+    );
+    if (!actieveOpdracht) window.genereerMissie(false);
+    if (!eventOpdracht) window.genereerMissie(true);
+    window.applySkinVisual(huidigeSkin);
+    window.updateUI();
+    return true;
+  } catch (err) {
+    console.error("Cloud load mislukt:", err);
+    return false;
+  }
+};
+
+window.initFirebase = () => {
+  try {
+    firebaseApp = initializeApp(firebaseConfig);
+    firebaseAuth = getAuth(firebaseApp);
+    firebaseDb = getFirestore(firebaseApp);
+    googleProvider = new GoogleAuthProvider();
+
+    onAuthStateChanged(firebaseAuth, async (user) => {
+      ingelogdeGebruiker = user || null;
+      if (ingelogdeGebruiker) {
+        const cloudGeladen = await window.loadCloudSave();
+        if (!cloudGeladen) await window.save(true);
+      }
+      if (document.getElementById("settingsPanel")) window.openSettings();
+    });
+  } catch (err) {
+    console.error("Firebase init mislukt:", err);
+  }
+};
+
+window.toggleGoogleLogin = async () => {
+  if (!firebaseAuth || !googleProvider) {
+    alert("Google login is nu niet beschikbaar.");
+    return;
+  }
+  try {
+    if (ingelogdeGebruiker) {
+      await window.save(true);
+      await signOut(firebaseAuth);
+      return;
+    }
+    await signInWithPopup(firebaseAuth, googleProvider);
+  } catch (err) {
+    console.error("Google login fout:", err);
+    alert("Google login mislukt. Probeer opnieuw.");
+  }
+};
+
+window.save = async (silent = false) => {
+  const moetLokaalOpslaan = autoSaveOnd || silent;
+  const moetCloudOpslaan = Boolean(ingelogdeGebruiker && firebaseDb);
+  if (!moetLokaalOpslaan && !moetCloudOpslaan) return;
+
+  const data = window.getSaveData();
+  localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
+
+  if (moetCloudOpslaan) {
+    try {
+      await setDoc(
+        getSaveDocRef(ingelogdeGebruiker.uid),
+        {
+          ...data,
+          accountEmail: ingelogdeGebruiker.email ?? null,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.error("Cloud save mislukt:", err);
+    }
+  }
+
+  if (autoSaveOnd) {
+    const t = document.getElementById("saveToast");
+    if (t) {
+      t.style.opacity = 1;
+      setTimeout(() => (t.style.opacity = 0), 1500);
+    }
+  }
+};
+
+window.load = () => {
+  const saved = localStorage.getItem(LOCAL_SAVE_KEY);
+  if (!saved) return false;
+  try {
+    return window.applySaveData(JSON.parse(saved));
+  } catch {
+    return false;
+  }
+};
+
+window.finalReset = async () => {
+  localStorage.removeItem(LOCAL_SAVE_KEY);
   localStorage.removeItem(CREATIVE_BACKUP_KEY);
+  if (firebaseDb && ingelogdeGebruiker) {
+    try {
+      await deleteDoc(getSaveDocRef(ingelogdeGebruiker.uid));
+    } catch (err) {
+      console.error("Cloud reset mislukt:", err);
+    }
+  }
   location.reload();
 };
 
 window.openResetConfirm = () => {
+  const accountResetMelding = ingelogdeGebruiker
+    ? "<br>Je cloud-account save wordt ook gewist."
+    : "";
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   overlay.innerHTML = `<div style="background:#7f1d1d; padding:60px; border:10px solid white; border-radius:40px; text-align:center;">
         <h1 style="font-size:80px; color:white; margin-bottom:10px;"> STOP!</h1>
-        <p style="font-size:30px; color:white; margin-bottom:40px;">Weet je het heel zeker? <br><b>Al je voortgang wordt gewist.</b></p>
+        <p style="font-size:30px; color:white; margin-bottom:40px;">Weet je het heel zeker? <br><b>Al je voortgang wordt gewist.</b>${accountResetMelding}</p>
         <button onclick="window.finalReset()" style="width:450px; padding:25px; background:white; color:#7f1d1d; font-family:Impact; font-size:32px; cursor:pointer; border:none; border-radius:20px; margin-bottom:15px;">JA, WIS ALLES!</button>
         <button onclick="window.openSettings()" style="width:450px; padding:20px; background:rgba(0,0,0,0.3); color:white; font-family:Impact; font-size:24px; cursor:pointer; border:2px solid white; border-radius:20px;">NEE, TERUG</button></div>`;
 };
 
 window.openSettings = () => {
+  const accountNaam = getAccountLabel();
+  const accountKnopTekst = ingelogdeGebruiker ? "UITLOGGEN" : "INLOGGEN MET GOOGLE";
+  const accountKnopKleur = ingelogdeGebruiker ? "#e67e22" : "#4285f4";
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  overlay.innerHTML = `<div style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
+  overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
         <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
+        <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
+        <button onclick="window.toggleGoogleLogin()" style="width:400px; padding:18px; background:${accountKnopKleur}; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">${accountKnopTekst}</button><br>
         <button onclick="window.openInfoPage()" style="width:400px; padding:16px; background:#1f2937; color:#93c5fd; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">INFO PAGINA</button><br>
         <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;"> RESET GAME </button><br>
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
-
 window.openCheat = () => {
   let c = (prompt("CODE:") || "").toUpperCase();
   if (c === "YEAHMAN") {
@@ -1383,6 +1546,7 @@ scene.add(light);
 camera.position.set(0, 5, 7);
 const MAP_HALF_SIZE = 70;
 const MAP_SIZE = MAP_HALF_SIZE * 2;
+const MAP_BOUNDARY_MARGIN = 0.8;
 const GRASS_DENSITY = 5;
 const GRASS_SPACING = 1 / GRASS_DENSITY;
 const GRASS_POSITION_JITTER = 0;
@@ -1467,8 +1631,13 @@ function cutGrassAtIndex(i, now) {
 }
 
 function updateGroundTiles() {
-  ground.position.x = mower.position.x;
-  ground.position.z = mower.position.z;
+  if (gameMode === "creative") {
+    ground.position.x = mower.position.x;
+    ground.position.z = mower.position.z;
+  } else {
+    ground.position.x = 0;
+    ground.position.z = 0;
+  }
 }
 
 function animate() {
@@ -1487,6 +1656,11 @@ function animate() {
   if (keys["s"] || keys["arrowdown"]) mower.position.z += s;
   if (keys["a"] || keys["q"] || keys["arrowleft"]) mower.position.x -= s;
   if (keys["d"] || keys["arrowright"]) mower.position.x += s;
+  if (gameMode === "classic") {
+    const maxPos = MAP_HALF_SIZE - MAP_BOUNDARY_MARGIN;
+    mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
+    mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
+  }
   if (mowerBlueKit && mowerBlueKit.visible && mowerBlueRotors.length) {
     for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25;
   }
@@ -1501,21 +1675,23 @@ function animate() {
   for (let i = 0; i < totalGrass; i++) {
     const g = grassData[i];
     let wrapped = false;
-    if (g.x < mower.position.x - MAP_HALF_SIZE) {
-      g.x += MAP_SIZE;
-      wrapped = true;
-    }
-    if (g.x > mower.position.x + MAP_HALF_SIZE) {
-      g.x -= MAP_SIZE;
-      wrapped = true;
-    }
-    if (g.z < mower.position.z - MAP_HALF_SIZE) {
-      g.z += MAP_SIZE;
-      wrapped = true;
-    }
-    if (g.z > mower.position.z + MAP_HALF_SIZE) {
-      g.z -= MAP_SIZE;
-      wrapped = true;
+    if (gameMode === "creative") {
+      if (g.x < mower.position.x - MAP_HALF_SIZE) {
+        g.x += MAP_SIZE;
+        wrapped = true;
+      }
+      if (g.x > mower.position.x + MAP_HALF_SIZE) {
+        g.x -= MAP_SIZE;
+        wrapped = true;
+      }
+      if (g.z < mower.position.z - MAP_HALF_SIZE) {
+        g.z += MAP_SIZE;
+        wrapped = true;
+      }
+      if (g.z > mower.position.z + MAP_HALF_SIZE) {
+        g.z -= MAP_SIZE;
+        wrapped = true;
+      }
     }
     if (wrapped) {
       g.cut = false;
@@ -1573,6 +1749,7 @@ function animate() {
 const isGeladen = window.load();
 if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
+window.initFirebase();
 
 setInterval(() => window.save(), 5000);
 window.updateUI();
@@ -1581,3 +1758,4 @@ scene.background = new THREE.Color(
   lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
 );
 animate();
+
