@@ -46,6 +46,10 @@ const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
 const GRASSPASS_DIAMANT_REWARD = 1;
 const RAD_BASIS_KOST = 2;
+const RADIUS_PRICE_MULTIPLIER = 1.3;
+const SPEED_PRICE_MULTIPLIER = 1.3;
+const VALUE_PRICE_MULTIPLIER = 1.35;
+const SHOP_UPGRADE_VASTE_KOST = 1;
 let grasWaarde = BASE_GRASS_VALUE,
   huidigeSnelheid = BASE_SPEED,
   huidigMowerRadius = 1.3;
@@ -85,6 +89,7 @@ let miniGameKnopZichtbaarTot = 0;
 let basicStateVoorCreative = null;
 const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 const LOCAL_SAVE_KEY = "grassMasterSaveV2";
+const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
 const FIREBASE_SAVE_COLLECTION = "saves";
 const firebaseConfig = {
   apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
@@ -101,6 +106,7 @@ let firebaseAuth = null;
 let firebaseDb = null;
 let googleProvider = null;
 let ingelogdeGebruiker = null;
+let localStateVoorLogin = null;
 
 const maanden = [
   "JANUARI",
@@ -525,7 +531,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   huidigeSkin = snapshot.huidigeSkin;
   ontgrendeldeSkins = [...snapshot.ontgrendeldeSkins];
   shopUpgradeLevel = snapshot.shopUpgradeLevel;
-  shopUpgradePrijs = snapshot.shopUpgradePrijs;
+  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
   verdienMultiplier = snapshot.verdienMultiplier;
   radDraaiCount = snapshot.radDraaiCount;
   creativeSpeed = snapshot.creativeSpeed;
@@ -722,8 +728,7 @@ window.openShop = () => {
   overlay.style.pointerEvents = "auto";
   if (!Number.isFinite(geld) || geld < 0) geld = 0;
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
-  if (!Number.isFinite(shopUpgradePrijs) || shopUpgradePrijs < 1)
-    shopUpgradePrijs = 1;
+  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
   const volgendeMulti = (verdienMultiplier * SHOP_MULTIPLIER_STEP).toFixed(2);
   const radKost = window.getRadKost();
   overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px;">
@@ -748,14 +753,15 @@ window.koopDiamant = () => {
 };
 
 window.koopShopUpgrade = () => {
-  if (diamanten < shopUpgradePrijs) {
-    alert(`Je hebt ${shopUpgradePrijs} diamanten nodig.`);
+  const kost = SHOP_UPGRADE_VASTE_KOST;
+  if (diamanten < kost) {
+    alert(`Je hebt ${kost} diamanten nodig.`);
     return;
   }
-  diamanten -= shopUpgradePrijs;
+  diamanten -= kost;
   shopUpgradeLevel++;
   verdienMultiplier *= SHOP_MULTIPLIER_STEP;
-  shopUpgradePrijs = Math.ceil(shopUpgradePrijs * 1.65);
+  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
   window.updateUI();
   window.openShop();
 };
@@ -766,8 +772,7 @@ window.getRadProgressFactor = () => {
   return 1 + verdienProgress + draaiProgress;
 };
 
-window.getRadKost = () =>
-  Math.max(1, Math.floor(RAD_BASIS_KOST + radDraaiCount * 0.18));
+window.getRadKost = () => RAD_BASIS_KOST;
 
 window.geefGratisUpgrade = (type) => {
   if (type === "r" && countRadius < MAX_RADIUS) {
@@ -1114,7 +1119,7 @@ window.applySaveData = (d) => {
   eventRewardKlaar = Boolean(d.eventRewardKlaar);
   diamanten = Number.isFinite(d.diamanten) ? d.diamanten : 0;
   shopUpgradeLevel = Number.isFinite(d.shopUpgradeLevel) ? d.shopUpgradeLevel : 0;
-  shopUpgradePrijs = Number.isFinite(d.shopUpgradePrijs) ? d.shopUpgradePrijs : 1;
+  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
   verdienMultiplier = Number.isFinite(d.verdienMultiplier)
     ? d.verdienMultiplier
     : Math.pow(SHOP_MULTIPLIER_STEP, shopUpgradeLevel);
@@ -1157,10 +1162,33 @@ window.initFirebase = () => {
     googleProvider = new GoogleAuthProvider();
 
     onAuthStateChanged(firebaseAuth, async (user) => {
+      const vorigeGebruiker = ingelogdeGebruiker;
       ingelogdeGebruiker = user || null;
       if (ingelogdeGebruiker) {
         const cloudGeladen = await window.loadCloudSave();
         if (!cloudGeladen) await window.save(true);
+      } else if (vorigeGebruiker) {
+        let backup = localStateVoorLogin;
+        if (!backup) {
+          const raw = localStorage.getItem(PRELOGIN_BACKUP_KEY);
+          if (raw) {
+            try {
+              backup = JSON.parse(raw);
+            } catch {}
+          }
+        }
+        if (backup) {
+          window.applySaveData(backup);
+          scene.background = new THREE.Color(
+            lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
+          );
+          if (!actieveOpdracht) window.genereerMissie(false);
+          if (!eventOpdracht) window.genereerMissie(true);
+          window.applySkinVisual(huidigeSkin);
+          window.updateUI();
+        }
+        localStateVoorLogin = null;
+        localStorage.removeItem(PRELOGIN_BACKUP_KEY);
       }
       if (document.getElementById("settingsPanel")) window.openSettings();
     });
@@ -1180,6 +1208,8 @@ window.toggleGoogleLogin = async () => {
       await signOut(firebaseAuth);
       return;
     }
+    localStateVoorLogin = window.getSaveData();
+    localStorage.setItem(PRELOGIN_BACKUP_KEY, JSON.stringify(localStateVoorLogin));
     await signInWithPopup(firebaseAuth, googleProvider);
   } catch (err) {
     console.error("Google login fout:", err);
@@ -1305,21 +1335,21 @@ window.koop = (t) => {
   if (t === "r" && countRadius < MAX_RADIUS && geld >= prijsRadius) {
     geld -= prijsRadius;
     huidigMowerRadius += 0.3;
-    prijsRadius *= 1.75;
+    prijsRadius *= RADIUS_PRICE_MULTIPLIER;
     countRadius++;
     totaalUpgrades++;
   }
   if (t === "s" && countSnelheid < MAX_OTHER && geld >= prijsSnelheid) {
     geld -= prijsSnelheid;
     huidigeSnelheid += 0.02;
-    prijsSnelheid *= 1.75;
+    prijsSnelheid *= SPEED_PRICE_MULTIPLIER;
     countSnelheid++;
     totaalUpgrades++;
   }
   if (t === "w" && countWaarde < MAX_OTHER && geld >= prijsWaarde) {
     geld -= prijsWaarde;
     grasWaarde += VALUE_UPGRADE_STEP;
-    prijsWaarde *= 1.9;
+    prijsWaarde *= VALUE_PRICE_MULTIPLIER;
     countWaarde++;
     totaalUpgrades++;
   }
@@ -1609,6 +1639,11 @@ grassMesh.instanceMatrix.needsUpdate = true;
 
 window.onkeydown = (e) => (keys[e.key.toLowerCase()] = true);
 window.onkeyup = (e) => (keys[e.key.toLowerCase()] = false);
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
 function cutGrassAtIndex(i, now) {
   const g = grassData[i];
@@ -1758,4 +1793,3 @@ scene.background = new THREE.Color(
   lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
 );
 animate();
-
