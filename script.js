@@ -89,6 +89,7 @@ const MINIGAME_ZONE_BREEDTES = [24, 16, 10];
 let miniGameRonde = 1;
 let miniGameKnopZichtbaarTot = 0;
 let basicStateVoorCreative = null;
+let gebruikteRedeemCodes = [];
 const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 const LOCAL_SAVE_KEY = "grassMasterSaveV2";
 const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
@@ -505,6 +506,7 @@ window.maakBasicSnapshot = () => ({
   verdienMultiplier,
   radDraaiCount,
   creativeSpeed,
+  gebruikteRedeemCodes: [...gebruikteRedeemCodes],
   mowerX: mower.position.x,
   mowerZ: mower.position.z,
 });
@@ -539,6 +541,11 @@ window.herstelBasicSnapshot = (snapshot) => {
   verdienMultiplier = snapshot.verdienMultiplier;
   radDraaiCount = snapshot.radDraaiCount;
   creativeSpeed = snapshot.creativeSpeed;
+  gebruikteRedeemCodes = Array.isArray(snapshot.gebruikteRedeemCodes)
+    ? snapshot.gebruikteRedeemCodes
+        .map((code) => String(code).trim().toUpperCase())
+        .filter(Boolean)
+    : [];
   mower.position.x = snapshot.mowerX;
   mower.position.z = snapshot.mowerZ;
   window.applySkinVisual(huidigeSkin);
@@ -1092,6 +1099,7 @@ window.getSaveData = () => ({
   radDraaiCount,
   creativeSpeed,
   fpsMeterOnd,
+  gebruikteRedeemCodes: [...gebruikteRedeemCodes],
 });
 
 window.applySaveData = (d) => {
@@ -1146,6 +1154,11 @@ window.applySaveData = (d) => {
   radDraaiCount = Number.isFinite(d.radDraaiCount) ? d.radDraaiCount : 0;
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   fpsMeterOnd = Boolean(d.fpsMeterOnd);
+  gebruikteRedeemCodes = Array.isArray(d.gebruikteRedeemCodes)
+    ? d.gebruikteRedeemCodes
+        .map((code) => String(code).trim().toUpperCase())
+        .filter(Boolean)
+    : [];
   return true;
 };
 
@@ -1321,18 +1334,25 @@ window.openSettings = () => {
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
 window.openCheat = () => {
-  let c = (prompt("CODE:") || "").toUpperCase();
+  const c = (prompt("CODE:") || "").trim().toUpperCase();
+  if (!c) return;
+  if (gebruikteRedeemCodes.includes(c)) {
+    alert("Deze redeem code is al gebruikt.");
+    return;
+  }
+
+  let gelukt = false;
   if (c === "YEAHMAN") {
     geld += 500000;
     totaalVerdiend += 500000;
-    window.updateUI();
+    gelukt = true;
   }
   if (c === "MINIGAME123") {
     miniGameKnopZichtbaar = true;
     miniGameKnopZichtbaarTot = Date.now() + MINIGAME_KNOP_DUUR_MS;
     miniGameCooldownTot = 0;
     miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
-    window.updateUI();
+    gelukt = true;
   }
   if (c === "MAXIMUM MIRACLE") {
     countRadius = MAX_RADIUS;
@@ -1343,8 +1363,17 @@ window.openCheat = () => {
     grasWaarde = BASE_GRASS_VALUE + MAX_OTHER * VALUE_UPGRADE_STEP;
     if (actieveOpdracht && actieveOpdracht.id === "u") rewardKlaar = true;
     if (eventOpdracht && eventOpdracht.id === "u") eventRewardKlaar = true;
-    window.updateUI();
+    gelukt = true;
   }
+
+  if (!gelukt) {
+    alert("Ongeldige code.");
+    return;
+  }
+
+  gebruikteRedeemCodes.push(c);
+  window.updateUI();
+  window.save(true);
 };
 
 window.koop = (t) => {
