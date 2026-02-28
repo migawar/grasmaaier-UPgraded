@@ -1343,8 +1343,7 @@ window.openCheat = () => {
 
   let gelukt = false;
   if (c === "YEAHMAN") {
-    geld += 50000;
-    totaalVerdiend += 50000;
+    geld += 5000;
     gelukt = true;
   }
   if (c === "MINIGAME123") {
