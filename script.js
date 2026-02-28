@@ -304,6 +304,25 @@ overlay.style.cssText =
   "position:fixed; top:0; left:-100%; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:10000; transition:0.3s; display:flex; align-items:center; justify-content:center; pointer-events:none; color:white; font-family:Impact;";
 document.body.appendChild(overlay);
 
+// Fallback: activeer elke knop, ook wanneer inline onclick niet automatisch bindt.
+document.addEventListener(
+  "click",
+  (event) => {
+    const btn = event.target instanceof Element ? event.target.closest("button") : null;
+    if (!btn || btn.disabled) return;
+    if (typeof btn.onclick === "function") return;
+    const inlineAction = btn.getAttribute("onclick");
+    if (!inlineAction) return;
+    event.preventDefault();
+    try {
+      new Function(inlineAction)();
+    } catch (err) {
+      console.error("Knop activatie mislukt:", err);
+    }
+  },
+  true,
+);
+
 ui.innerHTML = `
     <div id="geldDisp" style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.8); padding:15px 30px; border-radius:15px; border:4px solid #2ecc71; pointer-events:auto; color:#2ecc71; font-size:45px;">$ 0.00</div>
     <div id="diamantDisp" style="position:absolute; top:145px; right:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #5dade2; pointer-events:auto; color:#85c1e9; font-size:30px; text-align:right;">DIAMANTEN: 0</div>
