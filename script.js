@@ -1093,8 +1093,12 @@ window.openGP = () => {
 };
 window.claimGP = () => {
   if (rewardKlaar) {
-    if (gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0) {
+    const diamantLevel = gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0;
+    if (diamantLevel) {
       diamanten += GRASSPASS_DIAMANT_REWARD;
+    } else {
+      geld += 1;
+      totaalVerdiend += 1;
     }
     gpLevel++;
     window.genereerMissie(false);
