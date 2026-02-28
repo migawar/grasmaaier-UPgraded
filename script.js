@@ -1036,11 +1036,19 @@ window.openSkins = () => {
   ["RED", "BLUE", ...maanden].forEach((s) => {
     const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
-    h += `<button onclick="${ok ? `window.setSkin('${s}')` : ""}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;">${ok ? s : "LOCKED"}</button>`;
+    h += `<button class="skinSelectBtn" data-skin="${s}" data-unlocked="${ok ? "1" : "0"}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;" ${ok ? "" : "disabled"}>${ok ? s : "LOCKED"}</button>`;
   });
   overlay.innerHTML =
     h +
     `</div><button onclick="window.sluit()" style="margin-top:30px; padding:15px 60px; background:#3498db; color:white; border:none; border-radius:15px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button></div>`;
+  overlay.querySelectorAll(".skinSelectBtn").forEach((btn) => {
+    if (btn.getAttribute("data-unlocked") !== "1") return;
+    btn.addEventListener("click", () => {
+      const gekozenSkin = btn.getAttribute("data-skin");
+      if (!gekozenSkin) return;
+      window.setSkin(gekozenSkin);
+    });
+  });
 };
 window.setSkin = (s) => {
   huidigeSkin = s;
@@ -1195,10 +1203,11 @@ window.applySaveData = (d) => {
   gpLevel = Number.isFinite(d.gpLevel) ? d.gpLevel : 1;
   eventLevel = Number.isFinite(d.eventLevel) ? d.eventLevel : 1;
   huidigeSkin = d.huidigeSkin || "RED";
-  ontgrendeldeSkins =
-    Array.isArray(d.ontgrendeldeSkins) && d.ontgrendeldeSkins.length
-      ? d.ontgrendeldeSkins
-      : ["RED"];
+  ontgrendeldeSkins = Array.isArray(d.ontgrendeldeSkins)
+    ? [...new Set(d.ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()))]
+    : ["RED"];
+  if (!ontgrendeldeSkins.includes("RED")) ontgrendeldeSkins.unshift("RED");
+  if (!ontgrendeldeSkins.includes(huidigeSkin)) huidigeSkin = "RED";
   autoSaveOnd = Boolean(d.autoSaveOnd);
   gameMode = normalizeGameMode(d.gameMode);
   actieveOpdracht = d.actieveOpdracht || null;
