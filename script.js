@@ -25,8 +25,11 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000,
 );
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  powerPreference: "high-performance",
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -45,7 +48,9 @@ const VALUE_UPGRADE_STEP = 0.0002;
 const EARN_MULTIPLIER = 0.3;
 const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
+const SPEED_UPGRADE_STEP = 0.022;
 const GRASSPASS_DIAMANT_REWARD = 1;
+const GRASSPASS_DIAMANT_INTERVAL = 5;
 const RAD_BASIS_KOST = 2;
 const RADIUS_PRICE_MULTIPLIER = 1.3;
 const SPEED_PRICE_MULTIPLIER = 1.3;
@@ -301,12 +306,12 @@ document.body.appendChild(overlay);
 
 ui.innerHTML = `
     <div id="geldDisp" style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.8); padding:15px 30px; border-radius:15px; border:4px solid #2ecc71; pointer-events:auto; color:#2ecc71; font-size:45px;">$ 0.00</div>
-    <div id="diamantDisp" style="position:absolute; top:130px; left:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #5dade2; pointer-events:auto; color:#85c1e9; font-size:30px;">DIAMANTEN: 0</div>
+    <div id="diamantDisp" style="position:absolute; top:145px; right:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #5dade2; pointer-events:auto; color:#85c1e9; font-size:30px; text-align:right;">DIAMANTEN: 0</div>
     <div id="trofeeDisp" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:10px 25px; border-radius:15px; border:4px solid #f1c40f; pointer-events:auto; text-align:right;"></div>
-    <div id="miniGameSlot" style="position:absolute; top:145px; right:20px; pointer-events:auto;"></div>
+    <div id="miniGameSlot" style="position:absolute; top:300px; right:20px; pointer-events:auto;"></div>
     <button onclick="window.openSettings()" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:white; border:3px solid white; padding:10px 30px; border-radius:15px; font-size:20px; cursor:pointer; pointer-events:auto; font-family:Impact;">INSTELLINGEN</button>
     <div id="fpsDisp" style="position:absolute; top:72px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.78); border:3px solid #7f8c8d; color:#ecf0f1; padding:7px 14px; border-radius:12px; font-size:20px; pointer-events:none; display:none;">FPS: --</div>
-    <button id="shopBtn" onclick="window.openShop()" style="position:absolute; bottom:140px; left:25px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
+    <button id="shopBtn" onclick="window.openShop()" style="position:absolute; top:220px; right:20px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
     <div id="upgradeMenu" style="position:absolute; top:50%; left:20px; transform:translateY(-50%); display:flex; flex-direction:column; gap:12px; pointer-events:auto;"></div>
     <button id="gpBtn" onclick="window.openGP()" style="position:absolute; bottom:25px; left:25px; background:linear-gradient(to bottom, #f1c40f, #f39c12); color:white; border:5px solid white; padding:25px 50px; border-radius:20px; font-size:32px; cursor:pointer; pointer-events:auto; font-family:Impact;">GRASSPASS</button>
     <div id="rightPanel" style="position:absolute; bottom:25px; right:25px; display:flex; flex-direction:column; gap:10px; align-items:flex-end; pointer-events:auto;">
@@ -552,7 +557,58 @@ window.herstelBasicSnapshot = (snapshot) => {
   return true;
 };
 
+window.resetClassicGrassField = () => {
+  regrowQueue.length = 0;
+  regrowQueueHead = 0;
+  let i = 0;
+  for (let x = 0; x < grassPerSide; x++) {
+    for (let z = 0; z < grassPerSide; z++) {
+      const gx =
+        -MAP_HALF_SIZE + x * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
+      const gz =
+        -MAP_HALF_SIZE + z * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
+      const g = grassData[i];
+      g.x = gx;
+      g.z = gz;
+      g.cut = false;
+      g.cutTime = 0;
+      g.regrowAt = 0;
+      grassDummy.position.set(gx, GRASS_VISIBLE_Y, gz);
+      grassDummy.updateMatrix();
+      grassMesh.setMatrixAt(i, grassDummy.matrix);
+      i++;
+    }
+  }
+  grassMesh.instanceMatrix.needsUpdate = true;
+};
+
 window.toggleGameMode = () => {
+  window.cleanupMiniGame();
+  miniGameKnopZichtbaar = false;
+  miniGameKnopZichtbaarTot = 0;
+  const resetInput = () => {
+    for (const k in keys) keys[k] = false;
+  };
+  const herstelRuntimeNaModeSwitch = () => {
+    const maxPos = MAP_HALF_SIZE - MAP_BOUNDARY_MARGIN;
+    mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
+    mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
+    previousMowerPos.copy(mower.position);
+    mowerVelocity.set(0, 0, 0);
+    smoothedMowerVelocity.set(0, 0, 0);
+    cameraSwayOffset.set(0, 0, 0);
+    cameraSwayTarget.set(0, 0, 0);
+    cameraLookAhead.set(0, 0, 0);
+    desiredLookTarget.copy(mower.position);
+    cameraLookTarget.copy(mower.position);
+    desiredCameraPos.copy(mower.position).add(CAMERA_OFFSET);
+    camera.position.copy(desiredCameraPos);
+    frameAccumulatorMs = 0;
+    lastFrameTime = performance.now();
+    uiDirty = true;
+    resetInput();
+  };
+
   if (gameMode === "classic") {
     basicStateVoorCreative = window.maakBasicSnapshot();
     try {
@@ -588,11 +644,17 @@ window.toggleGameMode = () => {
         } catch {}
       }
     }
-    window.herstelBasicSnapshot(teHerstellen);
+    if (!window.herstelBasicSnapshot(teHerstellen)) {
+      gameMode = "classic";
+      if (!actieveOpdracht) window.genereerMissie(false);
+      if (!eventOpdracht) window.genereerMissie(true);
+    }
+    window.resetClassicGrassField();
     basicStateVoorCreative = null;
     localStorage.removeItem(CREATIVE_BACKUP_KEY);
   }
 
+  herstelRuntimeNaModeSwitch();
   window.updateUI();
   window.openSettings();
 };
@@ -794,7 +856,7 @@ window.geefGratisUpgrade = (type) => {
   }
   if (type === "s" && countSnelheid < MAX_OTHER) {
     countSnelheid++;
-    huidigeSnelheid += 0.02;
+    huidigeSnelheid += SPEED_UPGRADE_STEP;
     totaalUpgrades++;
     return true;
   }
@@ -989,6 +1051,7 @@ window.setSkin = (s) => {
 window.openGP = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
+  const diamantClaimBeschikbaar = gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0;
   const v = Math.min(
     window.getStat(actieveOpdracht.id) - actieveOpdracht.start,
     actieveOpdracht.d,
@@ -998,12 +1061,14 @@ window.openGP = () => {
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">LEVEL ${gpLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${actieveOpdracht.t}</p>
         <div style="width:500px; height:40px; background:#333; border:4px solid white; margin:30px auto; border-radius:20px; overflow:hidden;"><div style="width:${(v / actieveOpdracht.d) * 100}%; height:100%; background:#f1c40f;"></div></div>
-        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? `CLAIM ${GRASSPASS_DIAMANT_REWARD} DIAMANT` : "LOCKED"}</button>
+        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? (diamantClaimBeschikbaar ? `CLAIM ${GRASSPASS_DIAMANT_REWARD} DIAMANT` : "CLAIM LEVEL") : "LOCKED"}</button>
         <br><button onclick="window.sluit()" style="margin-top:30px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button></div>`;
 };
 window.claimGP = () => {
   if (rewardKlaar) {
-    diamanten += GRASSPASS_DIAMANT_REWARD;
+    if (gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0) {
+      diamanten += GRASSPASS_DIAMANT_REWARD;
+    }
     gpLevel++;
     window.genereerMissie(false);
     window.sluit();
@@ -1343,7 +1408,8 @@ window.openCheat = () => {
 
   let gelukt = false;
   if (c === "YEAHMAN") {
-    geld += 5000;
+    geld += 500000;
+    totaalVerdiend += 500000;
     gelukt = true;
   }
   if (c === "MINIGAME123") {
@@ -1358,7 +1424,7 @@ window.openCheat = () => {
     countSnelheid = MAX_OTHER;
     countWaarde = MAX_OTHER;
     huidigMowerRadius = 1.3 + MAX_RADIUS * 0.3;
-    huidigeSnelheid = BASE_SPEED + MAX_OTHER * 0.02;
+    huidigeSnelheid = BASE_SPEED + MAX_OTHER * SPEED_UPGRADE_STEP;
     grasWaarde = BASE_GRASS_VALUE + MAX_OTHER * VALUE_UPGRADE_STEP;
     if (actieveOpdracht && actieveOpdracht.id === "u") rewardKlaar = true;
     if (eventOpdracht && eventOpdracht.id === "u") eventRewardKlaar = true;
@@ -1386,7 +1452,7 @@ window.koop = (t) => {
   }
   if (t === "s" && countSnelheid < MAX_OTHER && geld >= prijsSnelheid) {
     geld -= prijsSnelheid;
-    huidigeSnelheid += 0.02;
+    huidigeSnelheid += SPEED_UPGRADE_STEP;
     prijsSnelheid *= SPEED_PRICE_MULTIPLIER;
     countSnelheid++;
     totaalUpgrades++;
@@ -1628,6 +1694,23 @@ const GRASS_POSITION_JITTER = 0;
 const GRASS_VISIBLE_Y = 0.1;
 const GRASS_HIDDEN_Y = -10;
 const CAMERA_OFFSET = new THREE.Vector3(0, 5, 7);
+const CAMERA_POSITION_SMOOTHNESS = 8;
+const CAMERA_LOOK_SMOOTHNESS = 10;
+const CAMERA_SWAY_SMOOTHNESS = 9;
+const CAMERA_SWAY_SIDE_FACTOR = 0.16;
+const CAMERA_SWAY_BACK_FACTOR = 0.08;
+const CAMERA_LOOK_AHEAD_FACTOR = 0.14;
+const desiredCameraPos = new THREE.Vector3();
+const cameraLookTarget = new THREE.Vector3();
+const previousMowerPos = new THREE.Vector3();
+const mowerVelocity = new THREE.Vector3();
+const smoothedMowerVelocity = new THREE.Vector3();
+const cameraSwayOffset = new THREE.Vector3();
+const cameraSwayTarget = new THREE.Vector3();
+const cameraLookAhead = new THREE.Vector3();
+const desiredLookTarget = new THREE.Vector3();
+cameraLookTarget.copy(mower.position);
+previousMowerPos.copy(mower.position);
 const GROUND_COLOR = 0x2f8a2f;
 const GROUND_TILE_SIZE = MAP_SIZE;
 const GRID_ORIGIN = -MAP_HALF_SIZE;
@@ -1659,9 +1742,12 @@ const grassData = new Array(totalGrass);
 const regrowQueue = [];
 let regrowQueueHead = 0;
 const UI_UPDATE_INTERVAL_MS = 100;
+const TARGET_FPS = 30;
+const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 let uiDirty = false;
 let lastUiUpdate = 0;
-let lastFrameNow = Date.now();
+let lastFrameTime = performance.now();
+let frameAccumulatorMs = 0;
 let fpsMeterFrames = 0;
 let fpsMeterLastSampleAt = performance.now();
 let grassIndex = 0;
@@ -1691,7 +1777,7 @@ window.onkeyup = (e) => (keys[e.key.toLowerCase()] = false);
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
@@ -1811,12 +1897,19 @@ function updateFpsMeter() {
   if (fpsEl) fpsEl.innerText = `FPS: ${fps}`;
 }
 
-function animate() {
+function animate(nowPerf = performance.now()) {
   requestAnimationFrame(animate);
-  let s = gameMode === "creative" ? creativeSpeed : huidigeSnelheid;
+  const frameDeltaMs = Math.max(0, Math.min(250, nowPerf - lastFrameTime));
+  lastFrameTime = nowPerf;
+  frameAccumulatorMs += frameDeltaMs;
+
+  if (frameAccumulatorMs < FRAME_INTERVAL_MS) return;
+  frameAccumulatorMs %= FRAME_INTERVAL_MS;
+
+  const deltaSec = FRAME_INTERVAL_MS / 1000;
+  const frameFactor = Math.min(3, deltaSec * 60);
+  let s = (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
   const now = Date.now();
-  const deltaSec = Math.max(0, (now - lastFrameNow) / 1000);
-  lastFrameNow = now;
   totaalSpeeltijdSec += deltaSec;
   if (
     (actieveOpdracht && actieveOpdracht.id === "p") ||
@@ -1833,7 +1926,7 @@ function animate() {
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
   }
   if (mowerBlueKit && mowerBlueKit.visible && mowerBlueRotors.length) {
-    for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25;
+    for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25 * frameFactor;
   }
   if (mowerBlueAuraLight && mowerBlueAuraLight.visible) {
     blueAuraPulse += deltaSec * 4.6;
@@ -1875,9 +1968,30 @@ function animate() {
     uiDirty = false;
   }
   if (matrixUpdateNodig) grassMesh.instanceMatrix.needsUpdate = true;
-  const camPos = mower.position.clone().add(CAMERA_OFFSET);
-  camera.position.lerp(camPos, 0.1);
-  camera.lookAt(mower.position);
+
+  mowerVelocity.copy(mower.position).sub(previousMowerPos);
+  if (deltaSec > 0) mowerVelocity.multiplyScalar(1 / deltaSec);
+  previousMowerPos.copy(mower.position);
+  const swayLerp = 1 - Math.exp(-CAMERA_SWAY_SMOOTHNESS * deltaSec);
+  smoothedMowerVelocity.lerp(mowerVelocity, swayLerp);
+  cameraSwayTarget.set(
+    -smoothedMowerVelocity.x * CAMERA_SWAY_SIDE_FACTOR,
+    0,
+    Math.abs(smoothedMowerVelocity.z) * CAMERA_SWAY_BACK_FACTOR,
+  );
+  cameraSwayOffset.lerp(cameraSwayTarget, swayLerp);
+
+  desiredCameraPos.copy(mower.position).add(CAMERA_OFFSET).add(cameraSwayOffset);
+  const camPosLerp = 1 - Math.exp(-CAMERA_POSITION_SMOOTHNESS * deltaSec);
+  camera.position.lerp(desiredCameraPos, camPosLerp);
+  cameraLookAhead
+    .copy(smoothedMowerVelocity)
+    .multiplyScalar(CAMERA_LOOK_AHEAD_FACTOR);
+  cameraLookAhead.y = 0;
+  desiredLookTarget.copy(mower.position).add(cameraLookAhead);
+  const lookLerp = 1 - Math.exp(-CAMERA_LOOK_SMOOTHNESS * deltaSec);
+  cameraLookTarget.lerp(desiredLookTarget, lookLerp);
+  camera.lookAt(cameraLookTarget);
   renderer.render(scene, camera);
 }
 
