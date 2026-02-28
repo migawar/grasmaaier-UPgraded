@@ -1123,6 +1123,10 @@ window.openEvent = () => {
 };
 window.claimEvent = () => {
   if (eventRewardKlaar) {
+    if (eventLevel !== 100) {
+      geld += 1;
+      totaalVerdiend += 1;
+    }
     if (eventLevel >= 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam))
       ontgrendeldeSkins.push(huidigeMaandNaam);
     eventLevel++;
