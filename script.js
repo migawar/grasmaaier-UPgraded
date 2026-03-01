@@ -377,7 +377,6 @@ window.resetMaandelijkseProgressie = () => {
   totaalSpeeltijdSec = 0;
   radDraaiCount = 0;
   creativeSpeed = 0.5;
-  gebruikteRedeemCodes = [];
   gameMode = "classic";
 
   diamanten = bewaardeDiamanten;
@@ -1693,8 +1692,7 @@ window.openCheat = () => {
 
   let gelukt = false;
   if (c === "YEAHMAN") {
-    geld += 500000;
-    totaalVerdiend += 500000;
+    geld += 1000;
     gelukt = true;
   }
   if (c === "MINIGAME123") {
