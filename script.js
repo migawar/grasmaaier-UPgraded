@@ -304,6 +304,20 @@ overlay.style.cssText =
   "position:fixed; top:0; left:-100%; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:10000; transition:0.3s; display:flex; align-items:center; justify-content:center; pointer-events:none; color:white; font-family:Impact;";
 document.body.appendChild(overlay);
 
+// Vergroot de klikzone van alle knoppen zonder visuele layout-wijziging.
+const globalButtonHitboxStyle = document.createElement("style");
+globalButtonHitboxStyle.textContent = `
+  button {
+    position: relative;
+  }
+  button::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+`;
+document.head.appendChild(globalButtonHitboxStyle);
+
 // Fallback: activeer elke knop, ook wanneer inline onclick niet automatisch bindt.
 document.addEventListener(
   "click",
