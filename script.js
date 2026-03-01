@@ -8,10 +8,15 @@ import {
   signOut,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
+  collection,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   getFirestore,
+  limit,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -50,7 +55,6 @@ const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
 const SPEED_UPGRADE_STEP = 0.022;
 const GRASSPASS_DIAMANT_REWARD = 1;
-const GRASSPASS_DIAMANT_INTERVAL = 5;
 const RAD_BASIS_KOST = 2;
 const RADIUS_PRICE_MULTIPLIER = 1.3;
 const SPEED_PRICE_MULTIPLIER = 1.3;
@@ -74,6 +78,7 @@ let regrowDelay = 8000,
 let fpsMeterOnd = false;
 let verdienMultiplier = 1;
 let totaalSpeeltijdSec = 0;
+let totaalVerdiendVoorTrofeeen = 0;
 let lichtKleur = "default";
 let radDraaiCount = 0;
 let radIsSpinning = false;
@@ -137,6 +142,7 @@ const getHuidigeEventMaandKey = () => {
   return `${nu.getFullYear()}-${maand}`;
 };
 let eventMaandKey = getHuidigeEventMaandKey();
+let spelerResetMaandKey = getHuidigeEventMaandKey();
 
 let gpLevel = 1,
   eventLevel = 1;
@@ -257,6 +263,28 @@ const normalizeGameMode = (mode) =>
   mode === "creative" ? "creative" : "classic";
 const getSaveDocRef = (uid) =>
   doc(firebaseDb, FIREBASE_SAVE_COLLECTION, String(uid));
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+const formatDisplayNameFromEmail = (email) => {
+  if (typeof email !== "string" || !email.includes("@")) return "ONBEKEND";
+  const lokaleNaam = email.split("@")[0].trim();
+  if (!lokaleNaam) return "ONBEKEND";
+  return lokaleNaam.slice(0, 24).toUpperCase();
+};
+const getLeaderboardDisplayName = (data, fallbackId = "") => {
+  if (typeof data?.accountDisplayName === "string" && data.accountDisplayName.trim()) {
+    return data.accountDisplayName.trim().slice(0, 24);
+  }
+  if (typeof data?.accountEmail === "string" && data.accountEmail.trim()) {
+    return formatDisplayNameFromEmail(data.accountEmail.trim());
+  }
+  return fallbackId ? `SPELER ${String(fallbackId).slice(0, 8)}` : "ONBEKEND";
+};
 const getAccountLabel = () => {
   if (!ingelogdeGebruiker) return "NIET INGELOGD";
   if (ingelogdeGebruiker.displayName) return ingelogdeGebruiker.displayName;
@@ -305,6 +333,79 @@ window.syncEventMetMaand = () => {
   eventRewardKlaar = false;
   eventOpdracht = null;
   window.genereerMissie(true);
+  return true;
+};
+window.resetMaandelijkseProgressie = () => {
+  const bewaardeDiamanten = diamanten;
+  const bewaardeGeclaimdeTrofeeen = geclaimdeTrofeeen;
+  const uniekeSkins = Array.isArray(ontgrendeldeSkins)
+    ? [...new Set(ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()))]
+    : ["RED"];
+  const bewaardeSkins = uniekeSkins.includes("RED")
+    ? uniekeSkins
+    : ["RED", ...uniekeSkins];
+  const bewaardeHuidigeSkin = bewaardeSkins.includes(huidigeSkin)
+    ? huidigeSkin
+    : "RED";
+
+  totaalVerdiendVoorTrofeeen += Math.max(0, totaalVerdiend);
+  spelerResetMaandKey = getHuidigeEventMaandKey();
+  eventMaandKey = spelerResetMaandKey;
+
+  geld = 0;
+  totaalVerdiend = 0;
+  totaalGemaaid = 0;
+  totaalUpgrades = 0;
+  grasWaarde = BASE_GRASS_VALUE;
+  huidigeSnelheid = BASE_SPEED;
+  huidigMowerRadius = 1.3;
+  prijsRadius = 5;
+  prijsSnelheid = 5;
+  prijsWaarde = 10;
+  countRadius = 0;
+  countSnelheid = 0;
+  countWaarde = 0;
+  gpLevel = 1;
+  eventLevel = 1;
+  actieveOpdracht = null;
+  eventOpdracht = null;
+  rewardKlaar = false;
+  eventRewardKlaar = false;
+  shopUpgradeLevel = 0;
+  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
+  verdienMultiplier = 1;
+  totaalSpeeltijdSec = 0;
+  radDraaiCount = 0;
+  creativeSpeed = 0.5;
+  gebruikteRedeemCodes = [];
+  gameMode = "classic";
+
+  diamanten = bewaardeDiamanten;
+  geclaimdeTrofeeen = bewaardeGeclaimdeTrofeeen;
+  ontgrendeldeSkins = bewaardeSkins;
+  huidigeSkin = bewaardeHuidigeSkin;
+
+  window.cleanupMiniGame();
+  miniGameKnopZichtbaar = false;
+  miniGameKnopZichtbaarTot = 0;
+  miniGameCooldownTot = 0;
+  miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
+  window.resetClassicGrassField();
+  window.genereerMissie(false);
+  window.genereerMissie(true);
+};
+window.syncSpelerResetMetMaand = (silent = false) => {
+  const actueleKey = getHuidigeEventMaandKey();
+  if (spelerResetMaandKey === actueleKey) return false;
+  window.resetMaandelijkseProgressie();
+  if (!silent) {
+    alert(
+      "Nieuwe maand gestart: je progressie is gereset (trofeeen, skins en diamanten blijven behouden).",
+    );
+  }
+  window.applySkinVisual(huidigeSkin);
+  window.updateUI();
+  window.save(true);
   return true;
 };
 
@@ -411,17 +512,22 @@ window.updateUI = () => {
     `$ ${geld.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   document.getElementById("diamantDisp").innerText =
     `DIAMANTEN: ${diamanten.toLocaleString()}`;
-  trofeeen = Math.floor(totaalVerdiend / 100000);
+  trofeeen = Math.floor((totaalVerdiendVoorTrofeeen + totaalVerdiend) / 100000);
   const miniGameBtnHtml = miniGameKnopZichtbaar
     ? `<button id="miniGameBtn" style="margin-top:8px; background:#16a085; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">MINIGAME</button>`
     : "";
   if (!isCreative) {
     document.getElementById("trofeeDisp").innerHTML =
       `<div style="color:#f1c40f; font-size:45px;">TROFEEEN: ${trofeeen}</div>
-          <button id="trofeePadBtn" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEENPAD</button>`;
+          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
+            <button id="trofeePadBtn" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEENPAD</button>
+            <button id="leaderboardBtn" style="background:#2980b9; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">LEADERBOARD</button>
+          </div>`;
     document.getElementById("miniGameSlot").innerHTML = miniGameBtnHtml;
     const trofeePadBtn = document.getElementById("trofeePadBtn");
     if (trofeePadBtn) trofeePadBtn.onclick = () => window.openTrofee();
+    const leaderboardBtn = document.getElementById("leaderboardBtn");
+    if (leaderboardBtn) leaderboardBtn.onclick = () => window.openLeaderboard();
     const miniGameBtn = document.getElementById("miniGameBtn");
     if (miniGameBtn) miniGameBtn.onclick = () => window.openMiniGame();
   } else {
@@ -534,6 +640,7 @@ window.applySkinVisual = (skinNaam) => {
 window.maakBasicSnapshot = () => ({
   geld,
   totaalVerdiend,
+  totaalVerdiendVoorTrofeeen,
   totaalGemaaid,
   totaalUpgrades,
   diamanten,
@@ -550,6 +657,7 @@ window.maakBasicSnapshot = () => ({
   gpLevel,
   eventLevel,
   eventMaandKey,
+  spelerResetMaandKey,
   actieveOpdracht: actieveOpdracht ? { ...actieveOpdracht } : null,
   eventOpdracht: eventOpdracht ? { ...eventOpdracht } : null,
   rewardKlaar,
@@ -570,6 +678,9 @@ window.herstelBasicSnapshot = (snapshot) => {
   if (!snapshot) return false;
   geld = snapshot.geld;
   totaalVerdiend = snapshot.totaalVerdiend;
+  totaalVerdiendVoorTrofeeen = Number.isFinite(snapshot.totaalVerdiendVoorTrofeeen)
+    ? snapshot.totaalVerdiendVoorTrofeeen
+    : 0;
   totaalGemaaid = snapshot.totaalGemaaid;
   totaalUpgrades = snapshot.totaalUpgrades;
   diamanten = snapshot.diamanten;
@@ -586,6 +697,8 @@ window.herstelBasicSnapshot = (snapshot) => {
   gpLevel = snapshot.gpLevel;
   eventLevel = snapshot.eventLevel;
   eventMaandKey = snapshot.eventMaandKey || getHuidigeEventMaandKey();
+  spelerResetMaandKey =
+    snapshot.spelerResetMaandKey || getHuidigeEventMaandKey();
   actieveOpdracht = snapshot.actieveOpdracht ? { ...snapshot.actieveOpdracht } : null;
   eventOpdracht = snapshot.eventOpdracht ? { ...snapshot.eventOpdracht } : null;
   rewardKlaar = snapshot.rewardKlaar;
@@ -727,6 +840,95 @@ window.openTrofee = () => {
   overlay.innerHTML =
     h +
     `<button onclick="window.sluit()" style="margin-top:20px; padding:15px 60px; background:#f1c40f; color:black; border:none; border-radius:15px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button></div>`;
+};
+
+window.openLeaderboard = async () => {
+  if (!firebaseDb) {
+    alert("Leaderboard is nu niet beschikbaar.");
+    return;
+  }
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #2980b9; border-radius:30px; text-align:center; min-width:640px; max-width:900px; max-height:85vh; overflow-y:auto;">
+      <h1 style="color:#5dade2; font-size:55px; margin-bottom:10px;">LEADERBOARD</h1>
+      <p style="margin-bottom:16px; color:#d6eaf8;">Top 10 spelers op basis van totaal verdiend</p>
+      <div style="font-size:24px; color:#bdc3c7;">LADEN...</div>
+    </div>`;
+  try {
+    const leaderboardQuery = query(
+      collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
+      orderBy("totaalVerdiend", "desc"),
+      limit(1000),
+    );
+    const snap = await getDocs(leaderboardQuery);
+    const spelers = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const email =
+        typeof data.accountEmail === "string" ? data.accountEmail.trim() : "";
+      if (!email || !email.includes("@")) return;
+      const verdiend = Number(data.totaalVerdiend);
+      if (!Number.isFinite(verdiend) || verdiend <= 0) return;
+      spelers.push({
+        uid: docSnap.id,
+        naam: getLeaderboardDisplayName(data, docSnap.id),
+        totaalVerdiend: verdiend,
+      });
+    });
+    spelers.sort((a, b) => b.totaalVerdiend - a.totaalVerdiend);
+    const topTien = spelers.slice(0, 10);
+    const mijnUid = ingelogdeGebruiker?.uid ? String(ingelogdeGebruiker.uid) : "";
+    const mijnIndex = mijnUid ? spelers.findIndex((speler) => speler.uid === mijnUid) : -1;
+    const mijnPositie =
+      mijnIndex >= 0
+        ? {
+            plaats: mijnIndex + 1,
+            naam: spelers[mijnIndex].naam,
+            totaalVerdiend: spelers[mijnIndex].totaalVerdiend,
+          }
+        : null;
+    const toonMijnPositie = Boolean(mijnPositie && mijnPositie.plaats > 10);
+    const lijstHtml = topTien.length
+      ? topTien
+          .map(
+            (speler, index) => `<div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:${index < 3 ? "#1b2631" : "#1f2937"}; border:2px solid ${index < 3 ? "#f1c40f" : "#334155"};">
+              <div style="font-size:24px; color:${index < 3 ? "#f1c40f" : "#93c5fd"};">#${index + 1}</div>
+              <div style="font-size:22px; color:white; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(speler.naam)}</div>
+              <div style="font-size:22px; color:#2ecc71; text-align:right;">$${speler.totaalVerdiend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+            </div>`,
+          )
+          .join("")
+      : `<div style="font-size:24px; color:#bdc3c7; margin:20px 0;">Nog geen Google-spelers met verdiende inkomsten gevonden.</div>`;
+    const mijnPositieHtml = toonMijnPositie
+      ? `<div style="margin-top:14px; padding-top:14px; border-top:2px dashed #3b4b63;">
+          <div style="font-size:20px; color:#95a5a6; margin-bottom:8px; text-align:left;">JOUW POSITIE</div>
+          <div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:#102a43; border:2px solid #4fc3f7;">
+            <div style="font-size:24px; color:#4fc3f7;">#${mijnPositie.plaats}</div>
+            <div style="font-size:22px; color:white; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(mijnPositie.naam)}</div>
+            <div style="font-size:22px; color:#2ecc71; text-align:right;">$${mijnPositie.totaalVerdiend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+          </div>
+        </div>`
+      : "";
+    overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #2980b9; border-radius:30px; text-align:center; min-width:640px; max-width:900px; max-height:85vh; overflow-y:auto;">
+        <h1 style="color:#5dade2; font-size:55px; margin-bottom:8px;">LEADERBOARD</h1>
+        <p style="margin-bottom:18px; color:#d6eaf8;">Top 10 spelers op basis van totaal verdiend (Google login)</p>
+        <div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; font-size:20px; color:#95a5a6; border-bottom:2px solid #34495e; padding-bottom:8px; margin-bottom:10px;">
+          <div>PLAATS</div>
+          <div>NAAM</div>
+          <div style="text-align:right;">TOTAAL VERDIEND</div>
+        </div>
+        ${lijstHtml}
+        ${mijnPositieHtml}
+        <button onclick="window.sluit()" style="margin-top:18px; padding:14px 56px; background:#2980b9; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
+      </div>`;
+  } catch (err) {
+    console.error("Leaderboard laden mislukt:", err);
+    overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #e74c3c; border-radius:30px; text-align:center; min-width:560px;">
+        <h1 style="color:#e74c3c; font-size:52px; margin-bottom:14px;">FOUT</h1>
+        <p style="font-size:24px; color:#ecf0f1;">Kon leaderboard niet laden. Probeer opnieuw.</p>
+        <button onclick="window.sluit()" style="margin-top:18px; padding:14px 56px; background:#e74c3c; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
+      </div>`;
+  }
 };
 
 window.cleanupMiniGame = () => {
@@ -1110,7 +1312,6 @@ window.setSkin = (s) => {
 window.openGP = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  const diamantClaimBeschikbaar = gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0;
   const v = Math.min(
     window.getStat(actieveOpdracht.id) - actieveOpdracht.start,
     actieveOpdracht.d,
@@ -1120,18 +1321,12 @@ window.openGP = () => {
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">LEVEL ${gpLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${actieveOpdracht.t}</p>
         <div style="width:500px; height:40px; background:#333; border:4px solid white; margin:30px auto; border-radius:20px; overflow:hidden;"><div style="width:${(v / actieveOpdracht.d) * 100}%; height:100%; background:#f1c40f;"></div></div>
-        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? (diamantClaimBeschikbaar ? `CLAIM ${GRASSPASS_DIAMANT_REWARD} DIAMANT` : "CLAIM LEVEL") : "LOCKED"}</button>
+        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? `CLAIM ${GRASSPASS_DIAMANT_REWARD} DIAMANT` : "LOCKED"}</button>
         <br><button onclick="window.sluit()" style="margin-top:30px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button></div>`;
 };
 window.claimGP = () => {
   if (rewardKlaar) {
-    const diamantLevel = gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0;
-    if (diamantLevel) {
-      diamanten += GRASSPASS_DIAMANT_REWARD;
-    } else {
-      geld += 1;
-      totaalVerdiend += 1;
-    }
+    diamanten += GRASSPASS_DIAMANT_REWARD;
     gpLevel++;
     window.genereerMissie(false);
     window.sluit();
@@ -1204,6 +1399,7 @@ window.toggleFpsMeter = () => {
 window.getSaveData = () => ({
   geld,
   totaalVerdiend,
+  totaalVerdiendVoorTrofeeen,
   totaalGemaaid,
   totaalUpgrades,
   geclaimdeTrofeeen,
@@ -1219,6 +1415,7 @@ window.getSaveData = () => ({
   gpLevel,
   eventLevel,
   eventMaandKey,
+  spelerResetMaandKey,
   huidigeSkin,
   ontgrendeldeSkins,
   autoSaveOnd,
@@ -1244,6 +1441,9 @@ window.applySaveData = (d) => {
 
   geld = Number.isFinite(d.geld) ? d.geld : 0;
   totaalVerdiend = Number.isFinite(d.totaalVerdiend) ? d.totaalVerdiend : 0;
+  totaalVerdiendVoorTrofeeen = Number.isFinite(d.totaalVerdiendVoorTrofeeen)
+    ? d.totaalVerdiendVoorTrofeeen
+    : 0;
   totaalGemaaid = Number.isFinite(d.totaalGemaaid) ? d.totaalGemaaid : 0;
   totaalUpgrades = Number.isFinite(d.totaalUpgrades) ? d.totaalUpgrades : 0;
   geclaimdeTrofeeen =
@@ -1276,6 +1476,11 @@ window.applySaveData = (d) => {
     typeof d.eventMaandKey === "string" && /^\d{4}-\d{2}$/.test(d.eventMaandKey)
       ? d.eventMaandKey
       : getHuidigeEventMaandKey();
+  spelerResetMaandKey =
+    typeof d.spelerResetMaandKey === "string" &&
+    /^\d{4}-\d{2}$/.test(d.spelerResetMaandKey)
+      ? d.spelerResetMaandKey
+      : getHuidigeEventMaandKey();
   autoSaveOnd = Boolean(d.autoSaveOnd);
   gameMode = normalizeGameMode(d.gameMode);
   actieveOpdracht = d.actieveOpdracht || null;
@@ -1301,6 +1506,7 @@ window.applySaveData = (d) => {
         .map((code) => String(code).trim().toUpperCase())
         .filter(Boolean)
     : [];
+  window.syncSpelerResetMetMaand(true);
   window.syncEventMetMaand();
   return true;
 };
@@ -1404,6 +1610,7 @@ window.save = async (silent = false) => {
         {
           ...data,
           accountEmail: ingelogdeGebruiker.email ?? null,
+          accountDisplayName: ingelogdeGebruiker.displayName ?? null,
           updatedAt: serverTimestamp(),
         },
         { merge: true },
@@ -1824,6 +2031,7 @@ const TARGET_FPS = 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 let uiDirty = false;
 let lastUiUpdate = 0;
+let volgendeMaandResetCheckAt = 0;
 let lastFrameTime = performance.now();
 let frameAccumulatorMs = 0;
 let fpsMeterFrames = 0;
@@ -1988,6 +2196,10 @@ function animate(nowPerf = performance.now()) {
   const frameFactor = Math.min(3, deltaSec * 60);
   let s = (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
   const now = Date.now();
+  if (now >= volgendeMaandResetCheckAt) {
+    volgendeMaandResetCheckAt = now + 10000;
+    if (window.syncSpelerResetMetMaand(true)) uiDirty = true;
+  }
   totaalSpeeltijdSec += deltaSec;
   if (
     (actieveOpdracht && actieveOpdracht.id === "p") ||
