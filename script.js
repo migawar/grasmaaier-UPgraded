@@ -130,8 +130,13 @@ const maanden = [
   "NOVEMBER",
   "DECEMBER",
 ];
-const nu = new Date();
-const huidigeMaandNaam = maanden[nu.getMonth()];
+const getHuidigeMaandNaam = () => maanden[new Date().getMonth()];
+const getHuidigeEventMaandKey = () => {
+  const nu = new Date();
+  const maand = String(nu.getMonth() + 1).padStart(2, "0");
+  return `${nu.getFullYear()}-${maand}`;
+};
+let eventMaandKey = getHuidigeEventMaandKey();
 
 let gpLevel = 1,
   eventLevel = 1;
@@ -292,6 +297,16 @@ window.genereerMissie = (isEvent = false) => {
     rewardKlaar = false;
   }
 };
+window.syncEventMetMaand = () => {
+  const actueleKey = getHuidigeEventMaandKey();
+  if (eventMaandKey === actueleKey) return false;
+  eventMaandKey = actueleKey;
+  eventLevel = 1;
+  eventRewardKlaar = false;
+  eventOpdracht = null;
+  window.genereerMissie(true);
+  return true;
+};
 
 // --- 4. UI SETUP ---
 const ui = document.createElement("div");
@@ -361,6 +376,7 @@ window.sluit = () => {
 };
 
 window.updateUI = () => {
+  window.syncEventMetMaand();
   const nu = Date.now();
   const isCreative = gameMode === "creative";
   const setDisplay = (id, show, display = "block") => {
@@ -533,6 +549,7 @@ window.maakBasicSnapshot = () => ({
   countWaarde,
   gpLevel,
   eventLevel,
+  eventMaandKey,
   actieveOpdracht: actieveOpdracht ? { ...actieveOpdracht } : null,
   eventOpdracht: eventOpdracht ? { ...eventOpdracht } : null,
   rewardKlaar,
@@ -568,6 +585,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   countWaarde = snapshot.countWaarde;
   gpLevel = snapshot.gpLevel;
   eventLevel = snapshot.eventLevel;
+  eventMaandKey = snapshot.eventMaandKey || getHuidigeEventMaandKey();
   actieveOpdracht = snapshot.actieveOpdracht ? { ...snapshot.actieveOpdracht } : null;
   eventOpdracht = snapshot.eventOpdracht ? { ...snapshot.eventOpdracht } : null;
   rewardKlaar = snapshot.rewardKlaar;
@@ -1122,10 +1140,12 @@ window.claimGP = () => {
 };
 
 window.openEvent = () => {
+  window.syncEventMetMaand();
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
+  const huidigeMaandNaam = getHuidigeMaandNaam();
   const skinClaimKlaar =
-    eventLevel >= 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam);
+    eventLevel === 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam);
   const v = Math.min(
     window.getStat(eventOpdracht.id) - eventOpdracht.start,
     eventOpdracht.d,
@@ -1140,12 +1160,14 @@ window.openEvent = () => {
         <br><button onclick="window.sluit()" style="margin-top:30px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button></div>`;
 };
 window.claimEvent = () => {
+  window.syncEventMetMaand();
   if (eventRewardKlaar) {
+    const huidigeMaandNaam = getHuidigeMaandNaam();
     if (eventLevel !== 100) {
       geld += 1;
       totaalVerdiend += 1;
     }
-    if (eventLevel >= 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam))
+    if (eventLevel === 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam))
       ontgrendeldeSkins.push(huidigeMaandNaam);
     eventLevel++;
     window.genereerMissie(true);
@@ -1196,6 +1218,7 @@ window.getSaveData = () => ({
   countWaarde,
   gpLevel,
   eventLevel,
+  eventMaandKey,
   huidigeSkin,
   ontgrendeldeSkins,
   autoSaveOnd,
@@ -1249,6 +1272,10 @@ window.applySaveData = (d) => {
     : ["RED"];
   if (!ontgrendeldeSkins.includes("RED")) ontgrendeldeSkins.unshift("RED");
   if (!ontgrendeldeSkins.includes(huidigeSkin)) huidigeSkin = "RED";
+  eventMaandKey =
+    typeof d.eventMaandKey === "string" && /^\d{4}-\d{2}$/.test(d.eventMaandKey)
+      ? d.eventMaandKey
+      : getHuidigeEventMaandKey();
   autoSaveOnd = Boolean(d.autoSaveOnd);
   gameMode = normalizeGameMode(d.gameMode);
   actieveOpdracht = d.actieveOpdracht || null;
@@ -1274,6 +1301,7 @@ window.applySaveData = (d) => {
         .map((code) => String(code).trim().toUpperCase())
         .filter(Boolean)
     : [];
+  window.syncEventMetMaand();
   return true;
 };
 
