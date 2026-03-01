@@ -49,11 +49,12 @@ let diamanten = 0,
 let trofeeen = 0,
   geclaimdeTrofeeen = 0;
 const BASE_GRASS_VALUE = 0.003;
-const VALUE_UPGRADE_STEP = 0.0002;
+const VALUE_UPGRADE_STEP = 0.000162;
 const EARN_MULTIPLIER = 0.3;
 const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
-const SPEED_UPGRADE_STEP = 0.022;
+const SPEED_UPGRADE_STEP = 0.01782;
+const RADIUS_UPGRADE_STEP = 0.243;
 const GRASSPASS_DIAMANT_REWARD = 1;
 const RAD_BASIS_KOST = 2;
 const RADIUS_PRICE_MULTIPLIER = 1.3;
@@ -1102,7 +1103,7 @@ window.getRadKost = () => RAD_BASIS_KOST;
 window.geefGratisUpgrade = (type) => {
   if (type === "r" && countRadius < MAX_RADIUS) {
     countRadius++;
-    huidigMowerRadius += 0.3;
+    huidigMowerRadius += RADIUS_UPGRADE_STEP;
     totaalUpgrades++;
     return true;
   }
@@ -1702,18 +1703,6 @@ window.openCheat = () => {
     miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
     gelukt = true;
   }
-  if (c === "MAXIMUM MIRACLE") {
-    countRadius = MAX_RADIUS;
-    countSnelheid = MAX_OTHER;
-    countWaarde = MAX_OTHER;
-    huidigMowerRadius = 1.3 + MAX_RADIUS * 0.3;
-    huidigeSnelheid = BASE_SPEED + MAX_OTHER * SPEED_UPGRADE_STEP;
-    grasWaarde = BASE_GRASS_VALUE + MAX_OTHER * VALUE_UPGRADE_STEP;
-    if (actieveOpdracht && actieveOpdracht.id === "u") rewardKlaar = true;
-    if (eventOpdracht && eventOpdracht.id === "u") eventRewardKlaar = true;
-    gelukt = true;
-  }
-
   if (!gelukt) {
     alert("Ongeldige code.");
     return;
@@ -1728,7 +1717,7 @@ window.koop = (t) => {
   if (gameMode === "creative") return;
   if (t === "r" && countRadius < MAX_RADIUS && geld >= prijsRadius) {
     geld -= prijsRadius;
-    huidigMowerRadius += 0.3;
+    huidigMowerRadius += RADIUS_UPGRADE_STEP;
     prijsRadius *= RADIUS_PRICE_MULTIPLIER;
     countRadius++;
     totaalUpgrades++;
