@@ -10,8 +10,8 @@ body { margin: 0; overflow: hidden; background: #000; }
 
 #liveChatPanel {
     position: fixed;
-    right: 16px;
-    bottom: 16px;
+    right: 260px;
+    bottom: 24px;
     width: min(360px, calc(100vw - 32px));
     z-index: 10001;
     pointer-events: auto;
@@ -43,7 +43,16 @@ body { margin: 0; overflow: hidden; background: #000; }
 }
 
 #liveChatPanel.has-unread .chat-toggle {
-    box-shadow: 0 0 0 2px #22c55e inset;
+    background: linear-gradient(90deg, #b91c1c, #dc2626);
+    color: #ffffff;
+    box-shadow: 0 0 0 2px #fecaca inset, 0 0 14px rgba(220, 38, 38, 0.6);
+    animation: chatUnreadPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chatUnreadPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); }
 }
 
 #liveChatPanel .chat-header {
@@ -143,7 +152,7 @@ body { margin: 0; overflow: hidden; background: #000; }
 @media (max-width: 640px) {
     #liveChatPanel {
         right: 8px;
-        bottom: 8px;
+        bottom: 96px;
         width: calc(100vw - 16px);
     }
 }
