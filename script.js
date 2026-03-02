@@ -8,6 +8,7 @@ import {
   signOut,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
+  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -15,6 +16,7 @@ import {
   getDocs,
   getFirestore,
   limit,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -53,6 +55,7 @@ const VALUE_UPGRADE_STEP = 0.000162;
 const EARN_MULTIPLIER = 0.3;
 const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
+const BASE_TURN_SPEED = 0.045;
 const SPEED_UPGRADE_STEP = 0.01782;
 const RADIUS_UPGRADE_STEP = 0.243;
 const GRASSPASS_DIAMANT_REWARD = 1;
@@ -77,6 +80,7 @@ let regrowDelay = 8000,
   creativeSpeed = 0.5,
   autoSaveOnd = false;
 let fpsMeterOnd = false;
+let oneindigSpeelveldOnd = false;
 let verdienMultiplier = 1;
 let totaalSpeeltijdSec = 0;
 let totaalVerdiendVoorTrofeeen = 0;
@@ -105,6 +109,9 @@ const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 const LOCAL_SAVE_KEY = "grassMasterSaveV2";
 const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
 const FIREBASE_SAVE_COLLECTION = "saves";
+const FIREBASE_CHAT_COLLECTION = "global_chat";
+const CHAT_MAX_BERICHT_LENGTE = 200;
+const CHAT_MAX_BERICHTEN = 40;
 const firebaseConfig = {
   apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
   authDomain: "grasmaaier-accaunts.firebaseapp.com",
@@ -121,6 +128,14 @@ let firebaseDb = null;
 let googleProvider = null;
 let ingelogdeGebruiker = null;
 let localStateVoorLogin = null;
+let chatUnsubscribe = null;
+let chatPanel = null;
+let chatMessagesEl = null;
+let chatInputEl = null;
+let chatSendBtnEl = null;
+let chatStatusEl = null;
+let chatHeeftOngelezen = false;
+let chatIsOpen = false;
 
 const maanden = [
   "JANUARI",
@@ -292,6 +307,164 @@ const getAccountLabel = () => {
   if (ingelogdeGebruiker.email)
     return ingelogdeGebruiker.email.split("@")[0].toUpperCase();
   return "GOOGLE ACCOUNT";
+};
+const isOneindigSpeelveldActief = () =>
+  gameMode === "creative" || oneindigSpeelveldOnd;
+const getChatDisplayName = () => {
+  if (ingelogdeGebruiker?.displayName?.trim()) {
+    return ingelogdeGebruiker.displayName.trim().slice(0, 24);
+  }
+  if (ingelogdeGebruiker?.email?.trim()) {
+    return formatDisplayNameFromEmail(ingelogdeGebruiker.email.trim());
+  }
+  return "GAST";
+};
+const formatChatTijd = (createdAt) => {
+  if (!createdAt || typeof createdAt.toDate !== "function") return "--:--";
+  const d = createdAt.toDate();
+  return d.toLocaleTimeString("nl-BE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+const setChatStatus = (tekst = "", kleur = "#9ca3af") => {
+  if (!chatStatusEl) return;
+  chatStatusEl.textContent = tekst;
+  chatStatusEl.style.color = kleur;
+};
+const setChatInputState = (enabled) => {
+  if (!chatInputEl || !chatSendBtnEl) return;
+  chatInputEl.disabled = !enabled;
+  chatSendBtnEl.disabled = !enabled;
+  chatInputEl.placeholder = enabled
+    ? "Typ je bericht..."
+    : "Log in met Google om te chatten";
+};
+const renderChatBerichten = (berichten) => {
+  if (!chatMessagesEl) return;
+  if (!berichten.length) {
+    chatMessagesEl.innerHTML =
+      '<div class="chat-empty">Nog geen berichten. Wees de eerste.</div>';
+    return;
+  }
+  chatMessagesEl.innerHTML = berichten
+    .map((item) => {
+      const naam = escapeHtml(item.displayName || "ONBEKEND");
+      const tekst = escapeHtml(item.text || "");
+      const tijd = escapeHtml(formatChatTijd(item.createdAt));
+      return `<div class="chat-message"><div class="chat-meta"><span class="chat-author">${naam}</span><span class="chat-time">${tijd}</span></div><div class="chat-text">${tekst}</div></div>`;
+    })
+    .join("");
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+};
+const setChatOpenState = (open) => {
+  if (!chatPanel) return;
+  chatIsOpen = open;
+  chatPanel.classList.toggle("is-open", open);
+  chatPanel.classList.toggle("has-unread", chatHeeftOngelezen && !open);
+  if (open) chatHeeftOngelezen = false;
+};
+const subscribeChat = () => {
+  if (!firebaseDb) return;
+  if (chatUnsubscribe) chatUnsubscribe();
+  setChatStatus("Verbinden...", "#9ca3af");
+  const chatQuery = query(
+    collection(firebaseDb, FIREBASE_CHAT_COLLECTION),
+    orderBy("createdAt", "desc"),
+    limit(CHAT_MAX_BERICHTEN),
+  );
+  chatUnsubscribe = onSnapshot(
+    chatQuery,
+    (snapshot) => {
+      const berichten = snapshot.docs
+        .map((d) => d.data())
+        .reverse();
+      renderChatBerichten(berichten);
+      if (!chatIsOpen && snapshot.docChanges().some((c) => c.type === "added")) {
+        chatHeeftOngelezen = true;
+      }
+      chatPanel?.classList.toggle("has-unread", chatHeeftOngelezen && !chatIsOpen);
+      setChatStatus("Live", "#22c55e");
+    },
+    (err) => {
+      console.error("Chat stream fout:", err);
+      setChatStatus("Geen verbinding", "#f87171");
+    },
+  );
+};
+window.sendChatMessage = async () => {
+  if (!firebaseDb) {
+    setChatStatus("Firebase niet klaar", "#f87171");
+    return;
+  }
+  if (!ingelogdeGebruiker) {
+    setChatStatus("Log in om te chatten", "#f59e0b");
+    return;
+  }
+  const raw = chatInputEl?.value ?? "";
+  const text = raw.trim();
+  if (!text) return;
+  const safeText = text.slice(0, CHAT_MAX_BERICHT_LENGTE);
+  chatInputEl.value = "";
+  try {
+    await addDoc(collection(firebaseDb, FIREBASE_CHAT_COLLECTION), {
+      text: safeText,
+      displayName: getChatDisplayName(),
+      uid: String(ingelogdeGebruiker.uid || ""),
+      createdAt: serverTimestamp(),
+    });
+    setChatStatus("Verzonden", "#22c55e");
+  } catch (err) {
+    console.error("Bericht verzenden mislukt:", err);
+    setChatStatus("Verzenden mislukt", "#f87171");
+  }
+};
+const buildChatUi = () => {
+  if (chatPanel) return;
+  chatPanel = document.createElement("section");
+  chatPanel.id = "liveChatPanel";
+  chatPanel.className = "is-open";
+  chatPanel.innerHTML = `
+    <button id="chatToggleBtn" class="chat-toggle" type="button">LIVE CHAT</button>
+    <div class="chat-body">
+      <div class="chat-header">
+        <span>Live Chat</span>
+        <span id="chatStatus" class="chat-status">...</span>
+      </div>
+      <div id="chatMessages" class="chat-messages">
+        <div class="chat-empty">Berichten laden...</div>
+      </div>
+      <div class="chat-input-row">
+        <input id="chatInput" maxlength="${CHAT_MAX_BERICHT_LENGTE}" type="text" autocomplete="off" placeholder="Typ je bericht..." />
+        <button id="chatSendBtn" type="button">Send</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(chatPanel);
+
+  chatMessagesEl = document.getElementById("chatMessages");
+  chatInputEl = document.getElementById("chatInput");
+  chatSendBtnEl = document.getElementById("chatSendBtn");
+  chatStatusEl = document.getElementById("chatStatus");
+  const chatToggleBtn = document.getElementById("chatToggleBtn");
+
+  chatToggleBtn?.addEventListener("click", () => setChatOpenState(!chatIsOpen));
+  chatSendBtnEl?.addEventListener("click", () => window.sendChatMessage());
+  chatInputEl?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      window.sendChatMessage();
+    }
+  });
+  setChatInputState(Boolean(ingelogdeGebruiker));
+  setChatStatus("Starten...", "#9ca3af");
+  setChatOpenState(true);
+};
+const refreshChatForAuthState = () => {
+  setChatInputState(Boolean(ingelogdeGebruiker));
+  if (!ingelogdeGebruiker) {
+    setChatStatus("Log in met Google", "#f59e0b");
+  }
 };
 
 // --- 3. CORE LOGICA ---
@@ -765,7 +938,8 @@ window.toggleGameMode = () => {
     cameraLookAhead.set(0, 0, 0);
     desiredLookTarget.copy(mower.position);
     cameraLookTarget.copy(mower.position);
-    desiredCameraPos.copy(mower.position).add(CAMERA_OFFSET);
+    setWorldVectorFromLocalXZ(cameraOffsetWorld, CAMERA_OFFSET, stuurYaw);
+    desiredCameraPos.copy(mower.position).add(cameraOffsetWorld);
     camera.position.copy(desiredCameraPos);
     frameAccumulatorMs = 0;
     lastFrameTime = performance.now();
@@ -1395,6 +1569,17 @@ window.toggleFpsMeter = () => {
   window.updateUI();
   window.openSettings();
 };
+window.toggleOneindigSpeelveld = () => {
+  oneindigSpeelveldOnd = !oneindigSpeelveldOnd;
+  if (gameMode === "classic") {
+    previousMowerPos.copy(mower.position);
+    mowerVelocity.set(0, 0, 0);
+    smoothedMowerVelocity.set(0, 0, 0);
+    cameraSwayOffset.set(0, 0, 0);
+    cameraSwayTarget.set(0, 0, 0);
+  }
+  window.openSettings();
+};
 
 window.getSaveData = () => ({
   geld,
@@ -1433,6 +1618,7 @@ window.getSaveData = () => ({
   radDraaiCount,
   creativeSpeed,
   fpsMeterOnd,
+  oneindigSpeelveldOnd,
   gebruikteRedeemCodes: [...gebruikteRedeemCodes],
 });
 
@@ -1501,6 +1687,7 @@ window.applySaveData = (d) => {
   radDraaiCount = Number.isFinite(d.radDraaiCount) ? d.radDraaiCount : 0;
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   fpsMeterOnd = Boolean(d.fpsMeterOnd);
+  oneindigSpeelveldOnd = Boolean(d.oneindigSpeelveldOnd);
   gebruikteRedeemCodes = Array.isArray(d.gebruikteRedeemCodes)
     ? d.gebruikteRedeemCodes
         .map((code) => String(code).trim().toUpperCase())
@@ -1569,9 +1756,12 @@ window.initFirebase = () => {
         localStorage.removeItem(PRELOGIN_BACKUP_KEY);
       }
       if (document.getElementById("settingsPanel")) window.openSettings();
+      refreshChatForAuthState();
     });
+    subscribeChat();
   } catch (err) {
     console.error("Firebase init mislukt:", err);
+    setChatStatus("Firebase fout", "#f87171");
   }
 };
 
@@ -1675,6 +1865,7 @@ window.openSettings = () => {
         <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
+        <button onclick="window.toggleOneindigSpeelveld()" style="width:400px; padding:20px; background:${oneindigSpeelveldOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ONEINDIG SPEELVELD: ${oneindigSpeelveldOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
         <button onclick="window.toggleFpsMeter()" style="width:400px; padding:20px; background:${fpsMeterOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FPS METER: ${fpsMeterOnd ? "AAN" : "UIT"}</button><br>
         <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
@@ -1972,6 +2163,7 @@ const CAMERA_SWAY_SMOOTHNESS = 9;
 const CAMERA_SWAY_SIDE_FACTOR = 0.16;
 const CAMERA_SWAY_BACK_FACTOR = 0.08;
 const CAMERA_LOOK_AHEAD_FACTOR = 0.14;
+let stuurYaw = 0;
 const desiredCameraPos = new THREE.Vector3();
 const cameraLookTarget = new THREE.Vector3();
 const previousMowerPos = new THREE.Vector3();
@@ -1981,6 +2173,20 @@ const cameraSwayOffset = new THREE.Vector3();
 const cameraSwayTarget = new THREE.Vector3();
 const cameraLookAhead = new THREE.Vector3();
 const desiredLookTarget = new THREE.Vector3();
+const cameraOffsetWorld = new THREE.Vector3();
+const cameraSwayWorld = new THREE.Vector3();
+const setWorldVectorFromLocalXZ = (out, localVec, yaw) => {
+  const rightX = Math.cos(yaw);
+  const rightZ = Math.sin(yaw);
+  const backX = -Math.sin(yaw);
+  const backZ = Math.cos(yaw);
+  out.set(
+    rightX * localVec.x + backX * localVec.z,
+    localVec.y,
+    rightZ * localVec.x + backZ * localVec.z,
+  );
+  return out;
+};
 cameraLookTarget.copy(mower.position);
 previousMowerPos.copy(mower.position);
 const GROUND_COLOR = 0x2f8a2f;
@@ -2075,7 +2281,7 @@ function cutGrassAtIndex(i, now) {
 }
 
 function updateGroundTiles() {
-  if (gameMode === "creative") {
+  if (isOneindigSpeelveldActief()) {
     ground.position.x = mower.position.x;
     ground.position.z = mower.position.z;
   } else {
@@ -2182,6 +2388,7 @@ function animate(nowPerf = performance.now()) {
   const deltaSec = FRAME_INTERVAL_MS / 1000;
   const frameFactor = Math.min(3, deltaSec * 60);
   let s = (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
+  const turnSpeed = BASE_TURN_SPEED * frameFactor;
   const now = Date.now();
   if (now >= volgendeMaandResetCheckAt) {
     volgendeMaandResetCheckAt = now + 10000;
@@ -2193,11 +2400,21 @@ function animate(nowPerf = performance.now()) {
     (eventOpdracht && eventOpdracht.id === "p")
   )
     uiDirty = true;
-  if (keys["w"] || keys["z"] || keys["arrowup"]) mower.position.z -= s;
-  if (keys["s"] || keys["arrowdown"]) mower.position.z += s;
-  if (keys["a"] || keys["q"] || keys["arrowleft"]) mower.position.x -= s;
-  if (keys["d"] || keys["arrowright"]) mower.position.x += s;
-  if (gameMode === "classic") {
+  const draaitLinks = Boolean(keys["a"] || keys["q"] || keys["arrowleft"]);
+  const draaitRechts = Boolean(keys["d"] || keys["arrowright"]);
+  if (draaitLinks) stuurYaw -= turnSpeed;
+  if (draaitRechts) stuurYaw += turnSpeed;
+  mower.rotation.y = -stuurYaw;
+
+  const rijdtVooruit = Boolean(keys["w"] || keys["z"] || keys["arrowup"]);
+  const rijdtAchteruit = Boolean(keys["s"] || keys["arrowdown"]);
+  const moveDir = (rijdtVooruit ? 1 : 0) + (rijdtAchteruit ? -1 : 0);
+  if (moveDir !== 0) {
+    const yaw = stuurYaw;
+    mower.position.x += Math.sin(yaw) * s * moveDir;
+    mower.position.z += -Math.cos(yaw) * s * moveDir;
+  }
+  if (gameMode === "classic" && !oneindigSpeelveldOnd) {
     const maxPos = MAP_HALF_SIZE - MAP_BOUNDARY_MARGIN;
     mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
@@ -2212,10 +2429,9 @@ function animate(nowPerf = performance.now()) {
   updateFpsMeter();
   updateGroundTiles();
   const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
-  let matrixUpdateNodig =
-    gameMode === "creative"
-      ? updateCreativeGrass(now, maaierRadiusSq)
-      : cutGrassNearMowerClassic(now, maaierRadiusSq);
+  let matrixUpdateNodig = isOneindigSpeelveldActief()
+    ? updateCreativeGrass(now, maaierRadiusSq)
+    : cutGrassNearMowerClassic(now, maaierRadiusSq);
 
   while (regrowQueueHead < regrowQueue.length) {
     const i = regrowQueue[regrowQueueHead];
@@ -2251,19 +2467,29 @@ function animate(nowPerf = performance.now()) {
   previousMowerPos.copy(mower.position);
   const swayLerp = 1 - Math.exp(-CAMERA_SWAY_SMOOTHNESS * deltaSec);
   smoothedMowerVelocity.lerp(mowerVelocity, swayLerp);
+  const yaw = stuurYaw;
+  const rightX = Math.cos(yaw);
+  const rightZ = Math.sin(yaw);
+  const forwardX = Math.sin(yaw);
+  const forwardZ = -Math.cos(yaw);
+  const localSideVel =
+    smoothedMowerVelocity.x * rightX + smoothedMowerVelocity.z * rightZ;
+  const localForwardVel =
+    smoothedMowerVelocity.x * forwardX + smoothedMowerVelocity.z * forwardZ;
   cameraSwayTarget.set(
-    -smoothedMowerVelocity.x * CAMERA_SWAY_SIDE_FACTOR,
+    -localSideVel * CAMERA_SWAY_SIDE_FACTOR,
     0,
-    Math.abs(smoothedMowerVelocity.z) * CAMERA_SWAY_BACK_FACTOR,
+    Math.abs(localForwardVel) * CAMERA_SWAY_BACK_FACTOR,
   );
   cameraSwayOffset.lerp(cameraSwayTarget, swayLerp);
-
-  desiredCameraPos.copy(mower.position).add(CAMERA_OFFSET).add(cameraSwayOffset);
+  setWorldVectorFromLocalXZ(cameraOffsetWorld, CAMERA_OFFSET, yaw);
+  setWorldVectorFromLocalXZ(cameraSwayWorld, cameraSwayOffset, yaw);
+  desiredCameraPos.copy(mower.position).add(cameraOffsetWorld).add(cameraSwayWorld);
   const camPosLerp = 1 - Math.exp(-CAMERA_POSITION_SMOOTHNESS * deltaSec);
   camera.position.lerp(desiredCameraPos, camPosLerp);
   cameraLookAhead
-    .copy(smoothedMowerVelocity)
-    .multiplyScalar(CAMERA_LOOK_AHEAD_FACTOR);
+    .set(forwardX, 0, forwardZ)
+    .multiplyScalar(localForwardVel * CAMERA_LOOK_AHEAD_FACTOR);
   cameraLookAhead.y = 0;
   desiredLookTarget.copy(mower.position).add(cameraLookAhead);
   const lookLerp = 1 - Math.exp(-CAMERA_LOOK_SMOOTHNESS * deltaSec);
@@ -2273,6 +2499,7 @@ function animate(nowPerf = performance.now()) {
 }
 
 // --- 8. STARTUP ---
+buildChatUi();
 const isGeladen = window.load();
 if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
