@@ -420,7 +420,6 @@ window.sendChatMessage = async () => {
   const text = raw.trim();
   if (!text) return;
   const safeText = text.slice(0, CHAT_MAX_BERICHT_LENGTE);
-  chatInputEl.value = "";
   try {
     await addDoc(collection(firebaseDb, FIREBASE_CHAT_COLLECTION), {
       text: safeText,
@@ -428,10 +427,17 @@ window.sendChatMessage = async () => {
       uid: String(ingelogdeGebruiker.uid || ""),
       createdAt: serverTimestamp(),
     });
+    chatInputEl.value = "";
     setChatStatus("Verzonden", "#22c55e");
   } catch (err) {
     console.error("Bericht verzenden mislukt:", err);
-    setChatStatus("Verzenden mislukt", "#f87171");
+    if (err?.code === "permission-denied") {
+      setChatStatus("Geen toegang om te verzenden", "#f87171");
+    } else if (err?.code === "unavailable") {
+      setChatStatus("Chat server offline", "#f87171");
+    } else {
+      setChatStatus(`Verzenden mislukt (${err?.code || "onbekend"})`, "#f87171");
+    }
   }
 };
 const buildChatUi = () => {
