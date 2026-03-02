@@ -119,6 +119,30 @@ const CHAT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const CHAT_CLEANUP_BATCH_SIZE = 100;
 const ONLINE_SPELER_WINDOW_MS = 45 * 1000;
 const ONLINE_SPELER_REFRESH_MS = 20 * 1000;
+const TROFEE_DREMPELS = [
+  100,
+  1000,
+  10000,
+  100000,
+  1000000,
+  10000000,
+  100000000,
+  1000000000,
+  10000000000,
+  100000000000,
+];
+const TROFEE_BELONINGEN = [
+  50,
+  250,
+  2000,
+  15000,
+  120000,
+  900000,
+  7000000,
+  50000000,
+  350000000,
+  2500000000,
+];
 const firebaseConfig = {
   apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
   authDomain: "grasmaaier-accaunts.firebaseapp.com",
@@ -321,6 +345,18 @@ const getAccountLabel = () => {
     return ingelogdeGebruiker.email.split("@")[0].toUpperCase();
   return "GOOGLE ACCOUNT";
 };
+const getTrofeeProgressVerdiend = () =>
+  Math.max(0, totaalVerdiendVoorTrofeeen + totaalVerdiend);
+const getVrijgespeeldeTrofeeen = () => {
+  const totaal = getTrofeeProgressVerdiend();
+  let unlocked = 0;
+  for (const drempel of TROFEE_DREMPELS) {
+    if (totaal >= drempel) unlocked++;
+  }
+  return unlocked;
+};
+const getTrofeeBeloning = (trofeeLevel) =>
+  TROFEE_BELONINGEN[Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))];
 const isOneindigSpeelveldActief = () =>
   gameMode === "creative" || oneindigSpeelveldOnd;
 const getChatDisplayName = () => {
@@ -817,7 +853,7 @@ window.updateUI = () => {
     `$ ${geld.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   document.getElementById("diamantDisp").innerText =
     `DIAMANTEN: ${diamanten.toLocaleString()}`;
-  trofeeen = Math.floor((totaalVerdiendVoorTrofeeen + totaalVerdiend) / 100000);
+  trofeeen = getVrijgespeeldeTrofeeen();
   const miniGameBtnHtml = miniGameKnopZichtbaar
     ? `<button id="miniGameBtn" style="margin-top:8px; background:#16a085; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">MINIGAME</button>`
     : "";
@@ -989,7 +1025,10 @@ window.herstelBasicSnapshot = (snapshot) => {
   totaalGemaaid = snapshot.totaalGemaaid;
   totaalUpgrades = snapshot.totaalUpgrades;
   diamanten = snapshot.diamanten;
-  geclaimdeTrofeeen = snapshot.geclaimdeTrofeeen;
+  geclaimdeTrofeeen = Number.isFinite(snapshot.geclaimdeTrofeeen)
+    ? snapshot.geclaimdeTrofeeen
+    : 0;
+  geclaimdeTrofeeen = Math.max(0, Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen));
   grasWaarde = snapshot.grasWaarde;
   huidigeSnelheid = snapshot.huidigeSnelheid;
   huidigMowerRadius = snapshot.huidigMowerRadius;
@@ -1132,14 +1171,31 @@ window.toggleGameMode = () => {
 window.openTrofee = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">TROFEEENPAD</h1><p style="margin-bottom:20px;">VERDIEN $100.000 VOOR EEN  TROFEE</p>`;
-  for (let i = 1; i <= 10; i++) {
+  trofeeen = getVrijgespeeldeTrofeeen();
+  const progress = getTrofeeProgressVerdiend();
+  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">TROFEEENPAD</h1><p style="margin-bottom:10px;">Progressie op basis van totaal verdiend</p><p style="margin-bottom:20px; color:#95a5a6;">TOTAAL: $${progress.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>`;
+  for (let i = 1; i <= TROFEE_DREMPELS.length; i++) {
     let geclaimd = i <= geclaimdeTrofeeen,
       kan = i <= trofeeen && !geclaimd;
-    let belBedrag = i * 7500,
-      bel = i === 10 ? "BLUE SKIN" : `$${belBedrag.toLocaleString()}`;
+    const drempel = TROFEE_DREMPELS[i - 1];
+    const vorigeDrempel = i === 1 ? 0 : TROFEE_DREMPELS[i - 2];
+    const stapDoel = Math.max(1, drempel - vorigeDrempel);
+    const stapVoortgang = Math.max(0, Math.min(stapDoel, progress - vorigeDrempel));
+    const stapPct = geclaimd ? 100 : Math.max(0, Math.min(100, (stapVoortgang / stapDoel) * 100));
+    const belBedrag = getTrofeeBeloning(i);
+    const bel = i === 10
+      ? `$${belBedrag.toLocaleString()} + BLUE SKIN`
+      : `$${belBedrag.toLocaleString()}`;
     h += `<div style="padding:20px; margin:10px; background:#222; border-radius:15px; display:flex; justify-content:space-between; align-items:center; border:3px solid ${geclaimd ? "#2ecc71" : kan ? "#f1c40f" : "#444"};">
-            <div style="text-align:left;"><div style="font-size:24px;">TROFEE ${i}</div><div style="color:#aaa;">BELONING: ${bel}</div></div>
+            <div style="text-align:left; min-width:320px;">
+              <div style="font-size:24px;">TROFEE ${i}</div>
+              <div style="color:#aaa;">VEREIST: $${drempel.toLocaleString()}</div>
+              <div style="color:#aaa;">BELONING: ${bel}</div>
+              <div style="width:100%; height:16px; background:#111827; border:2px solid #555; border-radius:10px; margin-top:8px; overflow:hidden;">
+                <div style="width:${stapPct}%; height:100%; background:${geclaimd || kan ? "#2ecc71" : "#f1c40f"};"></div>
+              </div>
+              <div style="color:#95a5a6; font-size:14px; margin-top:4px;">${Math.floor(stapPct)}% (${Math.floor(stapVoortgang).toLocaleString()}/${Math.floor(stapDoel).toLocaleString()})</div>
+            </div>
             ${geclaimd ? "CLAIMED" : kan ? `<button onclick="window.claimT(${i})" style="background:#2ecc71; color:white; border:none; padding:12px 25px; border-radius:10px; cursor:pointer; font-family:Impact; font-size:18px;">CLAIM</button>` : "LOCKED"}
         </div>`;
   }
@@ -1344,11 +1400,10 @@ window.stopMiniGame = () => {
 window.claimT = (i) => {
   if (i === geclaimdeTrofeeen + 1) {
     geclaimdeTrofeeen++;
+    geld += getTrofeeBeloning(i); // Trofee-beloningen verhogen alleen geld, niet totaalVerdiend.
     if (i === 10) {
-      ontgrendeldeSkins.push("BLUE");
-      alert("LEGENDARISCH!");
-    } else {
-      geld += i * 7500;
+      if (!ontgrendeldeSkins.includes("BLUE")) ontgrendeldeSkins.push("BLUE");
+      alert("LEGENDARISCH! BLUE SKIN VRIJGESPEELD");
     }
     window.openTrofee();
     window.updateUI();
@@ -1768,6 +1823,7 @@ window.applySaveData = (d) => {
     d.geclaimdeTrofeeen ?? d.geclaimdeTrofeeën ?? d["geclaimdeTrofeeÃ«n"] ?? 0;
   if (!Number.isFinite(geclaimdeTrofeeen) || geclaimdeTrofeeen < 0)
     geclaimdeTrofeeen = 0;
+  geclaimdeTrofeeen = Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen);
   grasWaarde = Number.isFinite(d.grasWaarde) ? d.grasWaarde : BASE_GRASS_VALUE;
   huidigeSnelheid = Number.isFinite(d.huidigeSnelheid)
     ? d.huidigeSnelheid
