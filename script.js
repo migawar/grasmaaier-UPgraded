@@ -8,17 +8,10 @@ import {
   signOut,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  addDoc,
-  collection,
   deleteDoc,
   doc,
   getDoc,
-  getDocs,
   getFirestore,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
   serverTimestamp,
   setDoc,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -51,14 +44,13 @@ let diamanten = 0,
 let trofeeen = 0,
   geclaimdeTrofeeen = 0;
 const BASE_GRASS_VALUE = 0.003;
-const VALUE_UPGRADE_STEP = 0.000162;
+const VALUE_UPGRADE_STEP = 0.0002;
 const EARN_MULTIPLIER = 0.3;
 const SHOP_MULTIPLIER_STEP = 1.1;
 const BASE_SPEED = 0.07;
-const BASE_TURN_SPEED = 0.045;
-const SPEED_UPGRADE_STEP = 0.01782;
-const RADIUS_UPGRADE_STEP = 0.243;
+const SPEED_UPGRADE_STEP = 0.022;
 const GRASSPASS_DIAMANT_REWARD = 1;
+const GRASSPASS_DIAMANT_INTERVAL = 5;
 const RAD_BASIS_KOST = 2;
 const RADIUS_PRICE_MULTIPLIER = 1.3;
 const SPEED_PRICE_MULTIPLIER = 1.3;
@@ -80,10 +72,8 @@ let regrowDelay = 8000,
   creativeSpeed = 0.5,
   autoSaveOnd = false;
 let fpsMeterOnd = false;
-let oneindigSpeelveldOnd = false;
 let verdienMultiplier = 1;
 let totaalSpeeltijdSec = 0;
-let totaalVerdiendVoorTrofeeen = 0;
 let lichtKleur = "default";
 let radDraaiCount = 0;
 let radIsSpinning = false;
@@ -109,9 +99,6 @@ const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 const LOCAL_SAVE_KEY = "grassMasterSaveV2";
 const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
 const FIREBASE_SAVE_COLLECTION = "saves";
-const FIREBASE_CHAT_COLLECTION = "global_chat";
-const CHAT_MAX_BERICHT_LENGTE = 200;
-const CHAT_MAX_BERICHTEN = 40;
 const firebaseConfig = {
   apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
   authDomain: "grasmaaier-accaunts.firebaseapp.com",
@@ -128,14 +115,6 @@ let firebaseDb = null;
 let googleProvider = null;
 let ingelogdeGebruiker = null;
 let localStateVoorLogin = null;
-let chatUnsubscribe = null;
-let chatPanel = null;
-let chatMessagesEl = null;
-let chatInputEl = null;
-let chatSendBtnEl = null;
-let chatStatusEl = null;
-let chatHeeftOngelezen = false;
-let chatIsOpen = false;
 
 const maanden = [
   "JANUARI",
@@ -158,7 +137,6 @@ const getHuidigeEventMaandKey = () => {
   return `${nu.getFullYear()}-${maand}`;
 };
 let eventMaandKey = getHuidigeEventMaandKey();
-let spelerResetMaandKey = getHuidigeEventMaandKey();
 
 let gpLevel = 1,
   eventLevel = 1;
@@ -268,6 +246,58 @@ const skinVisualOverrides = {
 };
 
 const keys = {};
+const mobileKeys = {};
+const isMovePressed = (codes) =>
+  codes.some((code) => keys[code] || mobileKeys[code]);
+const isMobileControllerEnabled = () =>
+  window.matchMedia("(pointer: coarse)").matches && window.innerWidth <= 980;
+
+const setMobileMoveState = (key, isPressed) => {
+  mobileKeys[key] = isPressed;
+};
+
+const clearMobileMoveStates = () => {
+  mobileKeys.arrowup = false;
+  mobileKeys.arrowdown = false;
+  mobileKeys.arrowleft = false;
+  mobileKeys.arrowright = false;
+};
+
+const updateMobileControlsVisibility = () => {
+  const controls = document.getElementById("mobileControls");
+  if (!controls) return;
+  const zichtbaar = isMobileControllerEnabled();
+  controls.style.display = zichtbaar ? "grid" : "none";
+  if (!zichtbaar) clearMobileMoveStates();
+};
+
+const bindMobileControls = () => {
+  const controls = document.getElementById("mobileControls");
+  if (!controls || controls.dataset.bound === "1") return;
+  controls.dataset.bound = "1";
+  const moveButtons = controls.querySelectorAll("[data-move-key]");
+
+  for (const button of moveButtons) {
+    const moveKey = button.getAttribute("data-move-key");
+    if (!moveKey) continue;
+
+    const stop = (event) => {
+      event.preventDefault();
+      setMobileMoveState(moveKey, false);
+    };
+
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      setMobileMoveState(moveKey, true);
+      button.setPointerCapture(event.pointerId);
+    });
+    button.addEventListener("pointerup", stop);
+    button.addEventListener("pointercancel", stop);
+    button.addEventListener("lostpointercapture", () => {
+      setMobileMoveState(moveKey, false);
+    });
+  }
+};
 let mowerBodyMaterial = null;
 let mowerDetailedModel = null;
 let mowerRedBlock = null;
@@ -279,214 +309,12 @@ const normalizeGameMode = (mode) =>
   mode === "creative" ? "creative" : "classic";
 const getSaveDocRef = (uid) =>
   doc(firebaseDb, FIREBASE_SAVE_COLLECTION, String(uid));
-const escapeHtml = (value) =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-const formatDisplayNameFromEmail = (email) => {
-  if (typeof email !== "string" || !email.includes("@")) return "ONBEKEND";
-  const lokaleNaam = email.split("@")[0].trim();
-  if (!lokaleNaam) return "ONBEKEND";
-  return lokaleNaam.slice(0, 24).toUpperCase();
-};
-const getLeaderboardDisplayName = (data, fallbackId = "") => {
-  if (typeof data?.accountDisplayName === "string" && data.accountDisplayName.trim()) {
-    return data.accountDisplayName.trim().slice(0, 24);
-  }
-  if (typeof data?.accountEmail === "string" && data.accountEmail.trim()) {
-    return formatDisplayNameFromEmail(data.accountEmail.trim());
-  }
-  return fallbackId ? `SPELER ${String(fallbackId).slice(0, 8)}` : "ONBEKEND";
-};
 const getAccountLabel = () => {
   if (!ingelogdeGebruiker) return "NIET INGELOGD";
   if (ingelogdeGebruiker.displayName) return ingelogdeGebruiker.displayName;
   if (ingelogdeGebruiker.email)
     return ingelogdeGebruiker.email.split("@")[0].toUpperCase();
   return "GOOGLE ACCOUNT";
-};
-const isOneindigSpeelveldActief = () =>
-  gameMode === "creative" || oneindigSpeelveldOnd;
-const getChatDisplayName = () => {
-  if (ingelogdeGebruiker?.displayName?.trim()) {
-    return ingelogdeGebruiker.displayName.trim().slice(0, 24);
-  }
-  if (ingelogdeGebruiker?.email?.trim()) {
-    return formatDisplayNameFromEmail(ingelogdeGebruiker.email.trim());
-  }
-  return "GAST";
-};
-const formatChatTijd = (createdAt) => {
-  if (!createdAt || typeof createdAt.toDate !== "function") return "--:--";
-  const d = createdAt.toDate();
-  return d.toLocaleTimeString("nl-BE", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-const setChatStatus = (tekst = "", kleur = "#9ca3af") => {
-  if (!chatStatusEl) return;
-  chatStatusEl.textContent = tekst;
-  chatStatusEl.style.color = kleur;
-};
-const setChatInputState = (enabled) => {
-  if (!chatInputEl || !chatSendBtnEl) return;
-  chatInputEl.disabled = !enabled;
-  chatSendBtnEl.disabled = !enabled;
-  chatInputEl.placeholder = enabled
-    ? "Typ je bericht..."
-    : "Log in met Google om te chatten";
-};
-const renderChatBerichten = (berichten) => {
-  if (!chatMessagesEl) return;
-  if (!berichten.length) {
-    chatMessagesEl.innerHTML =
-      '<div class="chat-empty">Nog geen berichten. Wees de eerste.</div>';
-    return;
-  }
-  chatMessagesEl.innerHTML = berichten
-    .map((item) => {
-      const naam = escapeHtml(item.displayName || "ONBEKEND");
-      const tekst = escapeHtml(item.text || "");
-      const tijd = escapeHtml(formatChatTijd(item.createdAt));
-      return `<div class="chat-message"><div class="chat-meta"><span class="chat-author">${naam}</span><span class="chat-time">${tijd}</span></div><div class="chat-text">${tekst}</div></div>`;
-    })
-    .join("");
-  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-};
-const setChatOpenState = (open) => {
-  if (!chatPanel) return;
-  chatIsOpen = open;
-  chatPanel.classList.toggle("is-open", open);
-  chatPanel.classList.toggle("has-unread", chatHeeftOngelezen && !open);
-  if (open) chatHeeftOngelezen = false;
-};
-const stopChatSubscription = () => {
-  if (!chatUnsubscribe) return;
-  chatUnsubscribe();
-  chatUnsubscribe = null;
-};
-const subscribeChat = () => {
-  if (!firebaseDb) return;
-  stopChatSubscription();
-  if (!ingelogdeGebruiker) {
-    setChatStatus("Log in met Google", "#f59e0b");
-    return;
-  }
-  setChatStatus("Verbinden...", "#9ca3af");
-  const chatQuery = query(
-    collection(firebaseDb, FIREBASE_CHAT_COLLECTION),
-    orderBy("createdAt", "desc"),
-    limit(CHAT_MAX_BERICHTEN),
-  );
-  chatUnsubscribe = onSnapshot(
-    chatQuery,
-    (snapshot) => {
-      const berichten = snapshot.docs
-        .map((d) => d.data())
-        .reverse();
-      renderChatBerichten(berichten);
-      if (!chatIsOpen && snapshot.docChanges().some((c) => c.type === "added")) {
-        chatHeeftOngelezen = true;
-      }
-      chatPanel?.classList.toggle("has-unread", chatHeeftOngelezen && !chatIsOpen);
-      setChatStatus("Live", "#22c55e");
-    },
-    (err) => {
-      console.error("Chat stream fout:", err);
-      if (err?.code === "permission-denied") {
-        setChatStatus("Geen toegang tot chat", "#f87171");
-      } else if (err?.code === "unavailable") {
-        setChatStatus("Chat server offline", "#f87171");
-      } else {
-        setChatStatus("Geen verbinding", "#f87171");
-      }
-    },
-  );
-};
-window.sendChatMessage = async () => {
-  if (!firebaseDb) {
-    setChatStatus("Firebase niet klaar", "#f87171");
-    return;
-  }
-  if (!ingelogdeGebruiker) {
-    setChatStatus("Log in om te chatten", "#f59e0b");
-    return;
-  }
-  const raw = chatInputEl?.value ?? "";
-  const text = raw.trim();
-  if (!text) return;
-  const safeText = text.slice(0, CHAT_MAX_BERICHT_LENGTE);
-  try {
-    await addDoc(collection(firebaseDb, FIREBASE_CHAT_COLLECTION), {
-      text: safeText,
-      displayName: getChatDisplayName(),
-      uid: String(ingelogdeGebruiker.uid || ""),
-      createdAt: serverTimestamp(),
-    });
-    chatInputEl.value = "";
-    setChatStatus("Verzonden", "#22c55e");
-  } catch (err) {
-    console.error("Bericht verzenden mislukt:", err);
-    if (err?.code === "permission-denied") {
-      setChatStatus("Geen toegang om te verzenden", "#f87171");
-    } else if (err?.code === "unavailable") {
-      setChatStatus("Chat server offline", "#f87171");
-    } else {
-      setChatStatus(`Verzenden mislukt (${err?.code || "onbekend"})`, "#f87171");
-    }
-  }
-};
-const buildChatUi = () => {
-  if (chatPanel) return;
-  chatPanel = document.createElement("section");
-  chatPanel.id = "liveChatPanel";
-  chatPanel.className = "is-open";
-  chatPanel.innerHTML = `
-    <button id="chatToggleBtn" class="chat-toggle" type="button">LIVE CHAT</button>
-    <div class="chat-body">
-      <div class="chat-header">
-        <span>Live Chat</span>
-        <span id="chatStatus" class="chat-status">...</span>
-      </div>
-      <div id="chatMessages" class="chat-messages">
-        <div class="chat-empty">Berichten laden...</div>
-      </div>
-      <div class="chat-input-row">
-        <input id="chatInput" maxlength="${CHAT_MAX_BERICHT_LENGTE}" type="text" autocomplete="off" placeholder="Typ je bericht..." />
-        <button id="chatSendBtn" type="button">Send</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(chatPanel);
-
-  chatMessagesEl = document.getElementById("chatMessages");
-  chatInputEl = document.getElementById("chatInput");
-  chatSendBtnEl = document.getElementById("chatSendBtn");
-  chatStatusEl = document.getElementById("chatStatus");
-  const chatToggleBtn = document.getElementById("chatToggleBtn");
-
-  chatToggleBtn?.addEventListener("click", () => setChatOpenState(!chatIsOpen));
-  chatSendBtnEl?.addEventListener("click", () => window.sendChatMessage());
-  chatInputEl?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      window.sendChatMessage();
-    }
-  });
-  setChatInputState(Boolean(ingelogdeGebruiker));
-  setChatStatus("Starten...", "#9ca3af");
-  setChatOpenState(true);
-};
-const refreshChatForAuthState = () => {
-  setChatInputState(Boolean(ingelogdeGebruiker));
-  if (!ingelogdeGebruiker) {
-    stopChatSubscription();
-    setChatStatus("Log in met Google", "#f59e0b");
-  }
 };
 
 // --- 3. CORE LOGICA ---
@@ -529,78 +357,6 @@ window.syncEventMetMaand = () => {
   eventRewardKlaar = false;
   eventOpdracht = null;
   window.genereerMissie(true);
-  return true;
-};
-window.resetMaandelijkseProgressie = () => {
-  const bewaardeDiamanten = diamanten;
-  const bewaardeGeclaimdeTrofeeen = geclaimdeTrofeeen;
-  const uniekeSkins = Array.isArray(ontgrendeldeSkins)
-    ? [...new Set(ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()))]
-    : ["RED"];
-  const bewaardeSkins = uniekeSkins.includes("RED")
-    ? uniekeSkins
-    : ["RED", ...uniekeSkins];
-  const bewaardeHuidigeSkin = bewaardeSkins.includes(huidigeSkin)
-    ? huidigeSkin
-    : "RED";
-
-  totaalVerdiendVoorTrofeeen += Math.max(0, totaalVerdiend);
-  spelerResetMaandKey = getHuidigeEventMaandKey();
-  eventMaandKey = spelerResetMaandKey;
-
-  geld = 0;
-  totaalVerdiend = 0;
-  totaalGemaaid = 0;
-  totaalUpgrades = 0;
-  grasWaarde = BASE_GRASS_VALUE;
-  huidigeSnelheid = BASE_SPEED;
-  huidigMowerRadius = 1.3;
-  prijsRadius = 5;
-  prijsSnelheid = 5;
-  prijsWaarde = 10;
-  countRadius = 0;
-  countSnelheid = 0;
-  countWaarde = 0;
-  gpLevel = 1;
-  eventLevel = 1;
-  actieveOpdracht = null;
-  eventOpdracht = null;
-  rewardKlaar = false;
-  eventRewardKlaar = false;
-  shopUpgradeLevel = 0;
-  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
-  verdienMultiplier = 1;
-  totaalSpeeltijdSec = 0;
-  radDraaiCount = 0;
-  creativeSpeed = 0.5;
-  gameMode = "classic";
-
-  diamanten = bewaardeDiamanten;
-  geclaimdeTrofeeen = bewaardeGeclaimdeTrofeeen;
-  ontgrendeldeSkins = bewaardeSkins;
-  huidigeSkin = bewaardeHuidigeSkin;
-
-  window.cleanupMiniGame();
-  miniGameKnopZichtbaar = false;
-  miniGameKnopZichtbaarTot = 0;
-  miniGameCooldownTot = 0;
-  miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
-  window.resetClassicGrassField();
-  window.genereerMissie(false);
-  window.genereerMissie(true);
-};
-window.syncSpelerResetMetMaand = (silent = false) => {
-  const actueleKey = getHuidigeEventMaandKey();
-  if (spelerResetMaandKey === actueleKey) return false;
-  window.resetMaandelijkseProgressie();
-  if (!silent) {
-    alert(
-      "Nieuwe maand gestart: je progressie is gereset (trofeeen, skins en diamanten blijven behouden).",
-    );
-  }
-  window.applySkinVisual(huidigeSkin);
-  window.updateUI();
-  window.save(true);
   return true;
 };
 
@@ -662,8 +418,19 @@ ui.innerHTML = `
         <button onclick="window.openCheat()" style="background:#e74c3c; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">REDEEM CODE</button>
         <button id="eventBtn" onclick="window.openEvent()" style="background:#9b59b6; color:white; border:5px solid white; padding:20px 45px; border-radius:20px; font-size:24px; cursor:pointer; font-family:Impact;">EVENT</button>
     </div>
+    <div id="mobileControls" style="position:absolute; bottom:24px; left:50%; transform:translateX(-50%); width:min(260px, 75vw); display:none; grid-template-columns:repeat(3, 1fr); grid-template-rows:repeat(2, 1fr); gap:10px; pointer-events:auto; touch-action:none;">
+        <div></div>
+        <button data-move-key="arrowup" style="height:58px; background:rgba(0,0,0,0.78); color:white; border:3px solid white; border-radius:14px; font-size:30px; font-family:Impact; touch-action:none;">U</button>
+        <div></div>
+        <button data-move-key="arrowleft" style="height:58px; background:rgba(0,0,0,0.78); color:white; border:3px solid white; border-radius:14px; font-size:30px; font-family:Impact; touch-action:none;">L</button>
+        <button data-move-key="arrowdown" style="height:58px; background:rgba(0,0,0,0.78); color:white; border:3px solid white; border-radius:14px; font-size:30px; font-family:Impact; touch-action:none;">D</button>
+        <button data-move-key="arrowright" style="height:58px; background:rgba(0,0,0,0.78); color:white; border:3px solid white; border-radius:14px; font-size:30px; font-family:Impact; touch-action:none;">R</button>
+    </div>
     <div id="saveToast" style="position:absolute; bottom:10px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,0.5); font-size:12px; opacity:0; transition:0.5s;">GAME OPGESLAGEN...</div>
 `;
+
+bindMobileControls();
+updateMobileControlsVisibility();
 
 window.sluit = () => {
   window.cleanupMiniGame();
@@ -707,22 +474,17 @@ window.updateUI = () => {
     `$ ${geld.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   document.getElementById("diamantDisp").innerText =
     `DIAMANTEN: ${diamanten.toLocaleString()}`;
-  trofeeen = Math.floor((totaalVerdiendVoorTrofeeen + totaalVerdiend) / 100000);
+  trofeeen = Math.floor(totaalVerdiend / 100000);
   const miniGameBtnHtml = miniGameKnopZichtbaar
     ? `<button id="miniGameBtn" style="margin-top:8px; background:#16a085; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">MINIGAME</button>`
     : "";
   if (!isCreative) {
     document.getElementById("trofeeDisp").innerHTML =
       `<div style="color:#f1c40f; font-size:45px;">TROFEEEN: ${trofeeen}</div>
-          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
-            <button id="trofeePadBtn" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEENPAD</button>
-            <button id="leaderboardBtn" style="background:#2980b9; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">LEADERBOARD</button>
-          </div>`;
+          <button id="trofeePadBtn" style="background:#f39c12; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">TROFEEENPAD</button>`;
     document.getElementById("miniGameSlot").innerHTML = miniGameBtnHtml;
     const trofeePadBtn = document.getElementById("trofeePadBtn");
     if (trofeePadBtn) trofeePadBtn.onclick = () => window.openTrofee();
-    const leaderboardBtn = document.getElementById("leaderboardBtn");
-    if (leaderboardBtn) leaderboardBtn.onclick = () => window.openLeaderboard();
     const miniGameBtn = document.getElementById("miniGameBtn");
     if (miniGameBtn) miniGameBtn.onclick = () => window.openMiniGame();
   } else {
@@ -835,7 +597,6 @@ window.applySkinVisual = (skinNaam) => {
 window.maakBasicSnapshot = () => ({
   geld,
   totaalVerdiend,
-  totaalVerdiendVoorTrofeeen,
   totaalGemaaid,
   totaalUpgrades,
   diamanten,
@@ -852,7 +613,6 @@ window.maakBasicSnapshot = () => ({
   gpLevel,
   eventLevel,
   eventMaandKey,
-  spelerResetMaandKey,
   actieveOpdracht: actieveOpdracht ? { ...actieveOpdracht } : null,
   eventOpdracht: eventOpdracht ? { ...eventOpdracht } : null,
   rewardKlaar,
@@ -873,9 +633,6 @@ window.herstelBasicSnapshot = (snapshot) => {
   if (!snapshot) return false;
   geld = snapshot.geld;
   totaalVerdiend = snapshot.totaalVerdiend;
-  totaalVerdiendVoorTrofeeen = Number.isFinite(snapshot.totaalVerdiendVoorTrofeeen)
-    ? snapshot.totaalVerdiendVoorTrofeeen
-    : 0;
   totaalGemaaid = snapshot.totaalGemaaid;
   totaalUpgrades = snapshot.totaalUpgrades;
   diamanten = snapshot.diamanten;
@@ -892,8 +649,6 @@ window.herstelBasicSnapshot = (snapshot) => {
   gpLevel = snapshot.gpLevel;
   eventLevel = snapshot.eventLevel;
   eventMaandKey = snapshot.eventMaandKey || getHuidigeEventMaandKey();
-  spelerResetMaandKey =
-    snapshot.spelerResetMaandKey || getHuidigeEventMaandKey();
   actieveOpdracht = snapshot.actieveOpdracht ? { ...snapshot.actieveOpdracht } : null;
   eventOpdracht = snapshot.eventOpdracht ? { ...snapshot.eventOpdracht } : null;
   rewardKlaar = snapshot.rewardKlaar;
@@ -960,8 +715,7 @@ window.toggleGameMode = () => {
     cameraLookAhead.set(0, 0, 0);
     desiredLookTarget.copy(mower.position);
     cameraLookTarget.copy(mower.position);
-    setWorldVectorFromLocalXZ(cameraOffsetWorld, CAMERA_OFFSET, stuurYaw);
-    desiredCameraPos.copy(mower.position).add(cameraOffsetWorld);
+    desiredCameraPos.copy(mower.position).add(CAMERA_OFFSET);
     camera.position.copy(desiredCameraPos);
     frameAccumulatorMs = 0;
     lastFrameTime = performance.now();
@@ -1036,95 +790,6 @@ window.openTrofee = () => {
   overlay.innerHTML =
     h +
     `<button onclick="window.sluit()" style="margin-top:20px; padding:15px 60px; background:#f1c40f; color:black; border:none; border-radius:15px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button></div>`;
-};
-
-window.openLeaderboard = async () => {
-  if (!firebaseDb) {
-    alert("Leaderboard is nu niet beschikbaar.");
-    return;
-  }
-  overlay.style.left = "0";
-  overlay.style.pointerEvents = "auto";
-  overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #2980b9; border-radius:30px; text-align:center; min-width:640px; max-width:900px; max-height:85vh; overflow-y:auto;">
-      <h1 style="color:#5dade2; font-size:55px; margin-bottom:10px;">LEADERBOARD</h1>
-      <p style="margin-bottom:16px; color:#d6eaf8;">Top 10 spelers op basis van totaal verdiend</p>
-      <div style="font-size:24px; color:#bdc3c7;">LADEN...</div>
-    </div>`;
-  try {
-    const leaderboardQuery = query(
-      collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
-      orderBy("totaalVerdiend", "desc"),
-      limit(1000),
-    );
-    const snap = await getDocs(leaderboardQuery);
-    const spelers = [];
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() || {};
-      const email =
-        typeof data.accountEmail === "string" ? data.accountEmail.trim() : "";
-      if (!email || !email.includes("@")) return;
-      const verdiend = Number(data.totaalVerdiend);
-      if (!Number.isFinite(verdiend) || verdiend <= 0) return;
-      spelers.push({
-        uid: docSnap.id,
-        naam: getLeaderboardDisplayName(data, docSnap.id),
-        totaalVerdiend: verdiend,
-      });
-    });
-    spelers.sort((a, b) => b.totaalVerdiend - a.totaalVerdiend);
-    const topTien = spelers.slice(0, 10);
-    const mijnUid = ingelogdeGebruiker?.uid ? String(ingelogdeGebruiker.uid) : "";
-    const mijnIndex = mijnUid ? spelers.findIndex((speler) => speler.uid === mijnUid) : -1;
-    const mijnPositie =
-      mijnIndex >= 0
-        ? {
-            plaats: mijnIndex + 1,
-            naam: spelers[mijnIndex].naam,
-            totaalVerdiend: spelers[mijnIndex].totaalVerdiend,
-          }
-        : null;
-    const toonMijnPositie = Boolean(mijnPositie && mijnPositie.plaats > 10);
-    const lijstHtml = topTien.length
-      ? topTien
-          .map(
-            (speler, index) => `<div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:${index < 3 ? "#1b2631" : "#1f2937"}; border:2px solid ${index < 3 ? "#f1c40f" : "#334155"};">
-              <div style="font-size:24px; color:${index < 3 ? "#f1c40f" : "#93c5fd"};">#${index + 1}</div>
-              <div style="font-size:22px; color:white; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(speler.naam)}</div>
-              <div style="font-size:22px; color:#2ecc71; text-align:right;">$${speler.totaalVerdiend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-            </div>`,
-          )
-          .join("")
-      : `<div style="font-size:24px; color:#bdc3c7; margin:20px 0;">Nog geen Google-spelers met verdiende inkomsten gevonden.</div>`;
-    const mijnPositieHtml = toonMijnPositie
-      ? `<div style="margin-top:14px; padding-top:14px; border-top:2px dashed #3b4b63;">
-          <div style="font-size:20px; color:#95a5a6; margin-bottom:8px; text-align:left;">JOUW POSITIE</div>
-          <div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:#102a43; border:2px solid #4fc3f7;">
-            <div style="font-size:24px; color:#4fc3f7;">#${mijnPositie.plaats}</div>
-            <div style="font-size:22px; color:white; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(mijnPositie.naam)}</div>
-            <div style="font-size:22px; color:#2ecc71; text-align:right;">$${mijnPositie.totaalVerdiend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-          </div>
-        </div>`
-      : "";
-    overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #2980b9; border-radius:30px; text-align:center; min-width:640px; max-width:900px; max-height:85vh; overflow-y:auto;">
-        <h1 style="color:#5dade2; font-size:55px; margin-bottom:8px;">LEADERBOARD</h1>
-        <p style="margin-bottom:18px; color:#d6eaf8;">Top 10 spelers op basis van totaal verdiend (Google login)</p>
-        <div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; font-size:20px; color:#95a5a6; border-bottom:2px solid #34495e; padding-bottom:8px; margin-bottom:10px;">
-          <div>PLAATS</div>
-          <div>NAAM</div>
-          <div style="text-align:right;">TOTAAL VERDIEND</div>
-        </div>
-        ${lijstHtml}
-        ${mijnPositieHtml}
-        <button onclick="window.sluit()" style="margin-top:18px; padding:14px 56px; background:#2980b9; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
-      </div>`;
-  } catch (err) {
-    console.error("Leaderboard laden mislukt:", err);
-    overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #e74c3c; border-radius:30px; text-align:center; min-width:560px;">
-        <h1 style="color:#e74c3c; font-size:52px; margin-bottom:14px;">FOUT</h1>
-        <p style="font-size:24px; color:#ecf0f1;">Kon leaderboard niet laden. Probeer opnieuw.</p>
-        <button onclick="window.sluit()" style="margin-top:18px; padding:14px 56px; background:#e74c3c; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
-      </div>`;
-  }
 };
 
 window.cleanupMiniGame = () => {
@@ -1299,7 +964,7 @@ window.getRadKost = () => RAD_BASIS_KOST;
 window.geefGratisUpgrade = (type) => {
   if (type === "r" && countRadius < MAX_RADIUS) {
     countRadius++;
-    huidigMowerRadius += RADIUS_UPGRADE_STEP;
+    huidigMowerRadius += 0.3;
     totaalUpgrades++;
     return true;
   }
@@ -1508,6 +1173,7 @@ window.setSkin = (s) => {
 window.openGP = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
+  const diamantClaimBeschikbaar = gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0;
   const v = Math.min(
     window.getStat(actieveOpdracht.id) - actieveOpdracht.start,
     actieveOpdracht.d,
@@ -1517,12 +1183,18 @@ window.openGP = () => {
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">LEVEL ${gpLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${actieveOpdracht.t}</p>
         <div style="width:500px; height:40px; background:#333; border:4px solid white; margin:30px auto; border-radius:20px; overflow:hidden;"><div style="width:${(v / actieveOpdracht.d) * 100}%; height:100%; background:#f1c40f;"></div></div>
-        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? `CLAIM ${GRASSPASS_DIAMANT_REWARD} DIAMANT` : "LOCKED"}</button>
+        <button onclick="window.claimGP()" style="padding:25px 70px; background:${rewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${rewardKlaar ? (diamantClaimBeschikbaar ? `CLAIM ${GRASSPASS_DIAMANT_REWARD} DIAMANT` : "CLAIM LEVEL") : "LOCKED"}</button>
         <br><button onclick="window.sluit()" style="margin-top:30px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button></div>`;
 };
 window.claimGP = () => {
   if (rewardKlaar) {
-    diamanten += GRASSPASS_DIAMANT_REWARD;
+    const diamantLevel = gpLevel % GRASSPASS_DIAMANT_INTERVAL === 0;
+    if (diamantLevel) {
+      diamanten += GRASSPASS_DIAMANT_REWARD;
+    } else {
+      geld += 1;
+      totaalVerdiend += 1;
+    }
     gpLevel++;
     window.genereerMissie(false);
     window.sluit();
@@ -1591,22 +1263,10 @@ window.toggleFpsMeter = () => {
   window.updateUI();
   window.openSettings();
 };
-window.toggleOneindigSpeelveld = () => {
-  oneindigSpeelveldOnd = !oneindigSpeelveldOnd;
-  if (gameMode === "classic") {
-    previousMowerPos.copy(mower.position);
-    mowerVelocity.set(0, 0, 0);
-    smoothedMowerVelocity.set(0, 0, 0);
-    cameraSwayOffset.set(0, 0, 0);
-    cameraSwayTarget.set(0, 0, 0);
-  }
-  window.openSettings();
-};
 
 window.getSaveData = () => ({
   geld,
   totaalVerdiend,
-  totaalVerdiendVoorTrofeeen,
   totaalGemaaid,
   totaalUpgrades,
   geclaimdeTrofeeen,
@@ -1622,7 +1282,6 @@ window.getSaveData = () => ({
   gpLevel,
   eventLevel,
   eventMaandKey,
-  spelerResetMaandKey,
   huidigeSkin,
   ontgrendeldeSkins,
   autoSaveOnd,
@@ -1640,7 +1299,6 @@ window.getSaveData = () => ({
   radDraaiCount,
   creativeSpeed,
   fpsMeterOnd,
-  oneindigSpeelveldOnd,
   gebruikteRedeemCodes: [...gebruikteRedeemCodes],
 });
 
@@ -1649,9 +1307,6 @@ window.applySaveData = (d) => {
 
   geld = Number.isFinite(d.geld) ? d.geld : 0;
   totaalVerdiend = Number.isFinite(d.totaalVerdiend) ? d.totaalVerdiend : 0;
-  totaalVerdiendVoorTrofeeen = Number.isFinite(d.totaalVerdiendVoorTrofeeen)
-    ? d.totaalVerdiendVoorTrofeeen
-    : 0;
   totaalGemaaid = Number.isFinite(d.totaalGemaaid) ? d.totaalGemaaid : 0;
   totaalUpgrades = Number.isFinite(d.totaalUpgrades) ? d.totaalUpgrades : 0;
   geclaimdeTrofeeen =
@@ -1684,11 +1339,6 @@ window.applySaveData = (d) => {
     typeof d.eventMaandKey === "string" && /^\d{4}-\d{2}$/.test(d.eventMaandKey)
       ? d.eventMaandKey
       : getHuidigeEventMaandKey();
-  spelerResetMaandKey =
-    typeof d.spelerResetMaandKey === "string" &&
-    /^\d{4}-\d{2}$/.test(d.spelerResetMaandKey)
-      ? d.spelerResetMaandKey
-      : getHuidigeEventMaandKey();
   autoSaveOnd = Boolean(d.autoSaveOnd);
   gameMode = normalizeGameMode(d.gameMode);
   actieveOpdracht = d.actieveOpdracht || null;
@@ -1709,13 +1359,11 @@ window.applySaveData = (d) => {
   radDraaiCount = Number.isFinite(d.radDraaiCount) ? d.radDraaiCount : 0;
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   fpsMeterOnd = Boolean(d.fpsMeterOnd);
-  oneindigSpeelveldOnd = Boolean(d.oneindigSpeelveldOnd);
   gebruikteRedeemCodes = Array.isArray(d.gebruikteRedeemCodes)
     ? d.gebruikteRedeemCodes
         .map((code) => String(code).trim().toUpperCase())
         .filter(Boolean)
     : [];
-  window.syncSpelerResetMetMaand(true);
   window.syncEventMetMaand();
   return true;
 };
@@ -1778,12 +1426,9 @@ window.initFirebase = () => {
         localStorage.removeItem(PRELOGIN_BACKUP_KEY);
       }
       if (document.getElementById("settingsPanel")) window.openSettings();
-      refreshChatForAuthState();
-      subscribeChat();
     });
   } catch (err) {
     console.error("Firebase init mislukt:", err);
-    setChatStatus("Firebase fout", "#f87171");
   }
 };
 
@@ -1822,7 +1467,6 @@ window.save = async (silent = false) => {
         {
           ...data,
           accountEmail: ingelogdeGebruiker.email ?? null,
-          accountDisplayName: ingelogdeGebruiker.displayName ?? null,
           updatedAt: serverTimestamp(),
         },
         { merge: true },
@@ -1887,7 +1531,6 @@ window.openSettings = () => {
         <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
-        <button onclick="window.toggleOneindigSpeelveld()" style="width:400px; padding:20px; background:${oneindigSpeelveldOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ONEINDIG SPEELVELD: ${oneindigSpeelveldOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
         <button onclick="window.toggleFpsMeter()" style="width:400px; padding:20px; background:${fpsMeterOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FPS METER: ${fpsMeterOnd ? "AAN" : "UIT"}</button><br>
         <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
@@ -1906,7 +1549,8 @@ window.openCheat = () => {
 
   let gelukt = false;
   if (c === "YEAHMAN") {
-    geld += 1000;
+    geld += 500000;
+    totaalVerdiend += 500000;
     gelukt = true;
   }
   if (c === "MINIGAME123") {
@@ -1916,6 +1560,18 @@ window.openCheat = () => {
     miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
     gelukt = true;
   }
+  if (c === "MAXIMUM MIRACLE") {
+    countRadius = MAX_RADIUS;
+    countSnelheid = MAX_OTHER;
+    countWaarde = MAX_OTHER;
+    huidigMowerRadius = 1.3 + MAX_RADIUS * 0.3;
+    huidigeSnelheid = BASE_SPEED + MAX_OTHER * SPEED_UPGRADE_STEP;
+    grasWaarde = BASE_GRASS_VALUE + MAX_OTHER * VALUE_UPGRADE_STEP;
+    if (actieveOpdracht && actieveOpdracht.id === "u") rewardKlaar = true;
+    if (eventOpdracht && eventOpdracht.id === "u") eventRewardKlaar = true;
+    gelukt = true;
+  }
+
   if (!gelukt) {
     alert("Ongeldige code.");
     return;
@@ -1930,7 +1586,7 @@ window.koop = (t) => {
   if (gameMode === "creative") return;
   if (t === "r" && countRadius < MAX_RADIUS && geld >= prijsRadius) {
     geld -= prijsRadius;
-    huidigMowerRadius += RADIUS_UPGRADE_STEP;
+    huidigMowerRadius += 0.3;
     prijsRadius *= RADIUS_PRICE_MULTIPLIER;
     countRadius++;
     totaalUpgrades++;
@@ -2185,7 +1841,6 @@ const CAMERA_SWAY_SMOOTHNESS = 9;
 const CAMERA_SWAY_SIDE_FACTOR = 0.16;
 const CAMERA_SWAY_BACK_FACTOR = 0.08;
 const CAMERA_LOOK_AHEAD_FACTOR = 0.14;
-let stuurYaw = 0;
 const desiredCameraPos = new THREE.Vector3();
 const cameraLookTarget = new THREE.Vector3();
 const previousMowerPos = new THREE.Vector3();
@@ -2195,20 +1850,6 @@ const cameraSwayOffset = new THREE.Vector3();
 const cameraSwayTarget = new THREE.Vector3();
 const cameraLookAhead = new THREE.Vector3();
 const desiredLookTarget = new THREE.Vector3();
-const cameraOffsetWorld = new THREE.Vector3();
-const cameraSwayWorld = new THREE.Vector3();
-const setWorldVectorFromLocalXZ = (out, localVec, yaw) => {
-  const rightX = Math.cos(yaw);
-  const rightZ = Math.sin(yaw);
-  const backX = -Math.sin(yaw);
-  const backZ = Math.cos(yaw);
-  out.set(
-    rightX * localVec.x + backX * localVec.z,
-    localVec.y,
-    rightZ * localVec.x + backZ * localVec.z,
-  );
-  return out;
-};
 cameraLookTarget.copy(mower.position);
 previousMowerPos.copy(mower.position);
 const GROUND_COLOR = 0x2f8a2f;
@@ -2246,7 +1887,6 @@ const TARGET_FPS = 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 let uiDirty = false;
 let lastUiUpdate = 0;
-let volgendeMaandResetCheckAt = 0;
 let lastFrameTime = performance.now();
 let frameAccumulatorMs = 0;
 let fpsMeterFrames = 0;
@@ -2275,11 +1915,16 @@ grassMesh.instanceMatrix.needsUpdate = true;
 
 window.onkeydown = (e) => (keys[e.key.toLowerCase()] = true);
 window.onkeyup = (e) => (keys[e.key.toLowerCase()] = false);
+window.addEventListener("blur", clearMobileMoveStates);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearMobileMoveStates();
+});
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  updateMobileControlsVisibility();
 });
 
 function cutGrassAtIndex(i, now) {
@@ -2303,7 +1948,7 @@ function cutGrassAtIndex(i, now) {
 }
 
 function updateGroundTiles() {
-  if (isOneindigSpeelveldActief()) {
+  if (gameMode === "creative") {
     ground.position.x = mower.position.x;
     ground.position.z = mower.position.z;
   } else {
@@ -2410,33 +2055,18 @@ function animate(nowPerf = performance.now()) {
   const deltaSec = FRAME_INTERVAL_MS / 1000;
   const frameFactor = Math.min(3, deltaSec * 60);
   let s = (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
-  const turnSpeed = BASE_TURN_SPEED * frameFactor;
   const now = Date.now();
-  if (now >= volgendeMaandResetCheckAt) {
-    volgendeMaandResetCheckAt = now + 10000;
-    if (window.syncSpelerResetMetMaand(true)) uiDirty = true;
-  }
   totaalSpeeltijdSec += deltaSec;
   if (
     (actieveOpdracht && actieveOpdracht.id === "p") ||
     (eventOpdracht && eventOpdracht.id === "p")
   )
     uiDirty = true;
-  const draaitLinks = Boolean(keys["a"] || keys["q"] || keys["arrowleft"]);
-  const draaitRechts = Boolean(keys["d"] || keys["arrowright"]);
-  if (draaitLinks) stuurYaw -= turnSpeed;
-  if (draaitRechts) stuurYaw += turnSpeed;
-  mower.rotation.y = -stuurYaw;
-
-  const rijdtVooruit = Boolean(keys["w"] || keys["z"] || keys["arrowup"]);
-  const rijdtAchteruit = Boolean(keys["s"] || keys["arrowdown"]);
-  const moveDir = (rijdtVooruit ? 1 : 0) + (rijdtAchteruit ? -1 : 0);
-  if (moveDir !== 0) {
-    const yaw = stuurYaw;
-    mower.position.x += Math.sin(yaw) * s * moveDir;
-    mower.position.z += -Math.cos(yaw) * s * moveDir;
-  }
-  if (gameMode === "classic" && !oneindigSpeelveldOnd) {
+  if (isMovePressed(["w", "z", "arrowup"])) mower.position.z -= s;
+  if (isMovePressed(["s", "arrowdown"])) mower.position.z += s;
+  if (isMovePressed(["a", "q", "arrowleft"])) mower.position.x -= s;
+  if (isMovePressed(["d", "arrowright"])) mower.position.x += s;
+  if (gameMode === "classic") {
     const maxPos = MAP_HALF_SIZE - MAP_BOUNDARY_MARGIN;
     mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
@@ -2451,9 +2081,10 @@ function animate(nowPerf = performance.now()) {
   updateFpsMeter();
   updateGroundTiles();
   const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
-  let matrixUpdateNodig = isOneindigSpeelveldActief()
-    ? updateCreativeGrass(now, maaierRadiusSq)
-    : cutGrassNearMowerClassic(now, maaierRadiusSq);
+  let matrixUpdateNodig =
+    gameMode === "creative"
+      ? updateCreativeGrass(now, maaierRadiusSq)
+      : cutGrassNearMowerClassic(now, maaierRadiusSq);
 
   while (regrowQueueHead < regrowQueue.length) {
     const i = regrowQueue[regrowQueueHead];
@@ -2489,29 +2120,19 @@ function animate(nowPerf = performance.now()) {
   previousMowerPos.copy(mower.position);
   const swayLerp = 1 - Math.exp(-CAMERA_SWAY_SMOOTHNESS * deltaSec);
   smoothedMowerVelocity.lerp(mowerVelocity, swayLerp);
-  const yaw = stuurYaw;
-  const rightX = Math.cos(yaw);
-  const rightZ = Math.sin(yaw);
-  const forwardX = Math.sin(yaw);
-  const forwardZ = -Math.cos(yaw);
-  const localSideVel =
-    smoothedMowerVelocity.x * rightX + smoothedMowerVelocity.z * rightZ;
-  const localForwardVel =
-    smoothedMowerVelocity.x * forwardX + smoothedMowerVelocity.z * forwardZ;
   cameraSwayTarget.set(
-    -localSideVel * CAMERA_SWAY_SIDE_FACTOR,
+    -smoothedMowerVelocity.x * CAMERA_SWAY_SIDE_FACTOR,
     0,
-    Math.abs(localForwardVel) * CAMERA_SWAY_BACK_FACTOR,
+    Math.abs(smoothedMowerVelocity.z) * CAMERA_SWAY_BACK_FACTOR,
   );
   cameraSwayOffset.lerp(cameraSwayTarget, swayLerp);
-  setWorldVectorFromLocalXZ(cameraOffsetWorld, CAMERA_OFFSET, yaw);
-  setWorldVectorFromLocalXZ(cameraSwayWorld, cameraSwayOffset, yaw);
-  desiredCameraPos.copy(mower.position).add(cameraOffsetWorld).add(cameraSwayWorld);
+
+  desiredCameraPos.copy(mower.position).add(CAMERA_OFFSET).add(cameraSwayOffset);
   const camPosLerp = 1 - Math.exp(-CAMERA_POSITION_SMOOTHNESS * deltaSec);
   camera.position.lerp(desiredCameraPos, camPosLerp);
   cameraLookAhead
-    .set(forwardX, 0, forwardZ)
-    .multiplyScalar(localForwardVel * CAMERA_LOOK_AHEAD_FACTOR);
+    .copy(smoothedMowerVelocity)
+    .multiplyScalar(CAMERA_LOOK_AHEAD_FACTOR);
   cameraLookAhead.y = 0;
   desiredLookTarget.copy(mower.position).add(cameraLookAhead);
   const lookLerp = 1 - Math.exp(-CAMERA_LOOK_SMOOTHNESS * deltaSec);
@@ -2521,7 +2142,6 @@ function animate(nowPerf = performance.now()) {
 }
 
 // --- 8. STARTUP ---
-buildChatUi();
 const isGeladen = window.load();
 if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
