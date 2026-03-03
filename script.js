@@ -38,7 +38,15 @@ const renderer = new THREE.WebGLRenderer({
   antialias: false,
   powerPreference: "high-performance",
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
+const hardwareThreads = Number.isFinite(navigator.hardwareConcurrency)
+  ? navigator.hardwareConcurrency
+  : 4;
+const deviceMemoryGb = Number.isFinite(navigator.deviceMemory)
+  ? navigator.deviceMemory
+  : 4;
+const isLowEndDevice = hardwareThreads <= 4 || deviceMemoryGb <= 4;
+const MAX_PIXEL_RATIO = isLowEndDevice ? 0.9 : 1;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -55,7 +63,8 @@ let trofeeen = 0,
 const BASE_GRASS_VALUE = 0.003;
 const VALUE_UPGRADE_STEP = 0.000162;
 const EARN_MULTIPLIER = 0.3;
-const SHOP_MULTIPLIER_STEP = 1.1;
+const REBIRT_BONUS_STEP = 1.01;
+const REBIRT_KOST_DIAMANT = 1;
 const BASE_SPEED = 0.07;
 const BASE_TURN_SPEED = 0.045;
 const SPEED_UPGRADE_STEP = 0.01782;
@@ -84,6 +93,7 @@ let regrowDelay = 8000,
 let fpsMeterOnd = false;
 let oneindigSpeelveldOnd = false;
 let verdienMultiplier = 1;
+let rebirtCount = 0;
 let totaalSpeeltijdSec = 0;
 let totaalVerdiendVoorTrofeeen = 0;
 let lichtKleur = "default";
@@ -670,81 +680,9 @@ window.genereerMissie = (isEvent = false) => {
 window.syncEventMetMaand = () => {
   const actueleKey = getHuidigeEventMaandKey();
   if (eventMaandKey === actueleKey) return false;
+  // Maandelijkse reset uitgeschakeld: enkel de key bijwerken.
   eventMaandKey = actueleKey;
-  eventLevel = 1;
-  eventRewardKlaar = false;
-  eventOpdracht = null;
-  window.genereerMissie(true);
   return true;
-};
-window.doRebirth = () => {
-  const bewaardeDiamanten = diamanten;
-  const bewaardeGeclaimdeTrofeeen = geclaimdeTrofeeen;
-  const uniekeSkins = Array.isArray(ontgrendeldeSkins)
-    ? [...new Set(ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()))]
-    : ["RED"];
-  const bewaardeSkins = uniekeSkins.includes("RED")
-    ? uniekeSkins
-    : ["RED", ...uniekeSkins];
-  const bewaardeHuidigeSkin = bewaardeSkins.includes(huidigeSkin)
-    ? huidigeSkin
-    : "RED";
-
-  totaalVerdiendVoorTrofeeen += Math.max(0, totaalVerdiend);
-  spelerResetMaandKey = getHuidigeEventMaandKey();
-
-  geld = 0;
-  totaalVerdiend = 0;
-  totaalGemaaid = 0;
-  totaalUpgrades = 0;
-  grasWaarde = BASE_GRASS_VALUE;
-  huidigeSnelheid = BASE_SPEED;
-  huidigMowerRadius = 1.3;
-  prijsRadius = 5;
-  prijsSnelheid = 5;
-  prijsWaarde = 10;
-  countRadius = 0;
-  countSnelheid = 0;
-  countWaarde = 0;
-  gpLevel = 1;
-  eventLevel = 1;
-  actieveOpdracht = null;
-  eventOpdracht = null;
-  rewardKlaar = false;
-  eventRewardKlaar = false;
-  shopUpgradeLevel = 0;
-  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
-  verdienMultiplier = 1;
-  totaalSpeeltijdSec = 0;
-  radDraaiCount = 0;
-  creativeSpeed = 0.5;
-  gameMode = "classic";
-
-  diamanten = bewaardeDiamanten;
-  geclaimdeTrofeeen = bewaardeGeclaimdeTrofeeen;
-  ontgrendeldeSkins = bewaardeSkins;
-  huidigeSkin = bewaardeHuidigeSkin;
-
-  window.cleanupMiniGame();
-  miniGameKnopZichtbaar = false;
-  miniGameKnopZichtbaarTot = 0;
-  miniGameCooldownTot = 0;
-  miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
-  window.resetClassicGrassField();
-  window.genereerMissie(false);
-  window.genereerMissie(true);
-  window.applySkinVisual(huidigeSkin);
-  window.updateUI();
-  window.save(true);
-};
-window.openRebirthConfirm = () => {
-  overlay.style.left = "0";
-  overlay.style.pointerEvents = "auto";
-  overlay.innerHTML = `<div style="background:#4a1d96; padding:60px; border:10px solid white; border-radius:40px; text-align:center;">
-        <h1 style="font-size:70px; color:white; margin-bottom:10px;">REBIRTH</h1>
-        <p style="font-size:28px; color:white; margin-bottom:36px;">Wil je een rebirth doen?<br><b>Je progressie reset, maar diamanten, trofee-claims en skins blijven.</b></p>
-        <button onclick="window.doRebirth(); window.sluit();" style="width:460px; padding:22px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; cursor:pointer; border:none; border-radius:20px; margin-bottom:14px;">JA, REBIRTH</button>
-        <button onclick="window.openSettings()" style="width:460px; padding:18px; background:rgba(0,0,0,0.3); color:white; font-family:Impact; font-size:24px; cursor:pointer; border:2px solid white; border-radius:20px;">NEE, TERUG</button></div>`;
 };
 
 // --- 4. UI SETUP ---
@@ -1004,6 +942,7 @@ window.maakBasicSnapshot = () => ({
   ontgrendeldeSkins: [...ontgrendeldeSkins],
   shopUpgradeLevel,
   shopUpgradePrijs,
+  rebirtCount,
   verdienMultiplier,
   radDraaiCount,
   creativeSpeed,
@@ -1048,7 +987,9 @@ window.herstelBasicSnapshot = (snapshot) => {
   ontgrendeldeSkins = [...snapshot.ontgrendeldeSkins];
   shopUpgradeLevel = snapshot.shopUpgradeLevel;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
-  verdienMultiplier = snapshot.verdienMultiplier;
+  rebirtCount = Number.isFinite(snapshot.rebirtCount) ? snapshot.rebirtCount : 0;
+  shopUpgradeLevel = 0;
+  verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
   radDraaiCount = snapshot.radDraaiCount;
   creativeSpeed = snapshot.creativeSpeed;
   gebruikteRedeemCodes = Array.isArray(snapshot.gebruikteRedeemCodes)
@@ -1412,16 +1353,17 @@ window.openShop = () => {
   overlay.style.pointerEvents = "auto";
   if (!Number.isFinite(geld) || geld < 0) geld = 0;
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
-  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
-  const volgendeMulti = (verdienMultiplier * SHOP_MULTIPLIER_STEP).toFixed(2);
+  const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(2);
   const radKost = window.getRadKost();
   overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px;">
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
         <p style="font-size:24px; margin:8px 0; color:#2ecc71;">Geld: $${geld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         <p style="font-size:26px; margin:10px 0 25px 0;">Diamanten: <span style="color:#85c1e9;">${diamanten}</span></p>
         <div style="width:100%; padding:14px; background:#1f2937; color:#93c5fd; border:3px solid #334155; border-radius:14px; font-family:Impact; font-size:22px; margin-bottom:12px;">DIAMANTEN KRIJG JE VIA GRASS PASS</div>
-        <button onclick="window.koopShopUpgrade()" style="width:100%; padding:18px; background:${diamanten >= shopUpgradePrijs ? "#27ae60" : "#555"}; color:white; border:3px solid white; border-radius:14px; cursor:${diamanten >= shopUpgradePrijs ? "pointer" : "default"}; font-family:Impact; font-size:25px;">VERDIENSTEN x1.1 (${shopUpgradePrijs}D)</button>
-        <p style="font-size:22px; color:#ccc; margin-top:18px;">Huidig: x${verdienMultiplier.toFixed(2)} | Volgend: x${volgendeMulti}</p>
+        <div style="margin-top:16px; padding:14px; background:#1f2d1f; border:3px solid #2ecc71; border-radius:14px;">
+          <button onclick="window.koopRebirt()" style="width:100%; padding:16px; background:${diamanten >= REBIRT_KOST_DIAMANT ? "#2ecc71" : "#555"}; color:white; border:3px solid white; border-radius:12px; cursor:${diamanten >= REBIRT_KOST_DIAMANT ? "pointer" : "default"}; font-family:Impact; font-size:24px;">REBIRT (+1% | ${REBIRT_KOST_DIAMANT}D)</button>
+          <p style="font-size:18px; color:#c8f7c5; margin:10px 0 0 0;">Reset enkel upgrades. Huidig: x${verdienMultiplier.toFixed(2)} | Na rebirt: x${volgendeRebirtMulti}</p>
+        </div>
         <div style="margin-top:22px; padding:16px; background:#2d1f3a; border:3px solid #8e44ad; border-radius:14px;">
           <div style="font-size:26px; color:#d2b4de; margin-bottom:8px;"> LUCKY RAD</div>
           <p style="font-size:20px; margin:0 0 12px 0; color:#e8daef;">Beloningen groeien geleidelijk met je progressie.</p>
@@ -1436,16 +1378,24 @@ window.koopDiamant = () => {
   alert("Diamanten kopen staat uit. Verdien diamanten via Grass Pass.");
 };
 
-window.koopShopUpgrade = () => {
-  const kost = SHOP_UPGRADE_VASTE_KOST;
-  if (diamanten < kost) {
-    alert(`Je hebt ${kost} diamanten nodig.`);
+window.koopRebirt = () => {
+  if (gameMode === "creative") return;
+  if (diamanten < REBIRT_KOST_DIAMANT) {
+    alert(`Je hebt ${REBIRT_KOST_DIAMANT} diamant nodig.`);
     return;
   }
-  diamanten -= kost;
-  shopUpgradeLevel++;
-  verdienMultiplier *= SHOP_MULTIPLIER_STEP;
-  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
+  diamanten -= REBIRT_KOST_DIAMANT;
+  countRadius = 0;
+  countSnelheid = 0;
+  countWaarde = 0;
+  huidigMowerRadius = 1.3;
+  huidigeSnelheid = BASE_SPEED;
+  grasWaarde = BASE_GRASS_VALUE;
+  prijsRadius = 5;
+  prijsSnelheid = 5;
+  prijsWaarde = 10;
+  rebirtCount++;
+  verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
   window.updateUI();
   window.openShop();
 };
@@ -1796,6 +1746,7 @@ window.getSaveData = () => ({
   diamanten,
   shopUpgradeLevel,
   shopUpgradePrijs,
+  rebirtCount,
   verdienMultiplier,
   totaalSpeeltijdSec,
   lichtKleur,
@@ -1859,11 +1810,10 @@ window.applySaveData = (d) => {
   rewardKlaar = Boolean(d.rewardKlaar);
   eventRewardKlaar = Boolean(d.eventRewardKlaar);
   diamanten = Number.isFinite(d.diamanten) ? d.diamanten : 0;
-  shopUpgradeLevel = Number.isFinite(d.shopUpgradeLevel) ? d.shopUpgradeLevel : 0;
+  shopUpgradeLevel = 0;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
-  verdienMultiplier = Number.isFinite(d.verdienMultiplier)
-    ? d.verdienMultiplier
-    : Math.pow(SHOP_MULTIPLIER_STEP, shopUpgradeLevel);
+  rebirtCount = Number.isFinite(d.rebirtCount) ? d.rebirtCount : 0;
+  verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
   totaalSpeeltijdSec = Number.isFinite(d.totaalSpeeltijdSec)
     ? d.totaalSpeeltijdSec
     : 0;
@@ -2053,7 +2003,6 @@ window.openSettings = () => {
         <button onclick="window.toggleOneindigSpeelveld()" style="width:400px; padding:20px; background:${oneindigSpeelveldOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ONEINDIG SPEELVELD: ${oneindigSpeelveldOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
         <button onclick="window.toggleFpsMeter()" style="width:400px; padding:20px; background:${fpsMeterOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FPS METER: ${fpsMeterOnd ? "AAN" : "UIT"}</button><br>
-        <button onclick="window.openRebirthConfirm()" style="width:400px; padding:18px; background:#6d28d9; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">REBIRTH</button><br>
         <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
         <button onclick="window.toggleGoogleLogin()" style="width:400px; padding:18px; background:${accountKnopKleur}; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">${accountKnopTekst}</button><br>
         <button onclick="window.openInfoPage()" style="width:400px; padding:16px; background:#1f2937; color:#93c5fd; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">INFO PAGINA</button><br>
@@ -2337,7 +2286,7 @@ camera.position.set(0, 5, 7);
 const MAP_HALF_SIZE = 70;
 const MAP_SIZE = MAP_HALF_SIZE * 2;
 const MAP_BOUNDARY_MARGIN = 0.8;
-const GRASS_DENSITY = 5;
+const GRASS_DENSITY = isLowEndDevice ? 4.25 : 5;
 const GRASS_SPACING = 1 / GRASS_DENSITY;
 const GRASS_POSITION_JITTER = 0;
 const GRASS_VISIBLE_Y = 0.1;
@@ -2391,7 +2340,12 @@ scene.add(ground);
 
 const grassPerSide = Math.floor(MAP_SIZE / GRASS_SPACING);
 const totalGrass = grassPerSide * grassPerSide;
-const grassGeometry = new THREE.SphereGeometry(0.1, 6, 6);
+const grassDetailSegments = isLowEndDevice ? 5 : 6;
+const grassGeometry = new THREE.SphereGeometry(
+  0.1,
+  grassDetailSegments,
+  grassDetailSegments,
+);
 const grassMaterial = new THREE.MeshLambertMaterial({ color: 0x008000 });
 const grassMesh = new THREE.InstancedMesh(
   grassGeometry,
@@ -2399,6 +2353,7 @@ const grassMesh = new THREE.InstancedMesh(
   totalGrass,
 );
 grassMesh.frustumCulled = false;
+grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
 
 const grassDummy = new THREE.Object3D();
@@ -2406,14 +2361,17 @@ const grassData = new Array(totalGrass);
 const regrowQueue = [];
 let regrowQueueHead = 0;
 const UI_UPDATE_INTERVAL_MS = 100;
-const TARGET_FPS = 30;
+const TARGET_FPS = isLowEndDevice ? 28 : 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+const CREATIVE_UPDATE_SKIP_FRAMES = isLowEndDevice ? 1 : 0;
+let creativeUpdateSkipCounter = 0;
 let uiDirty = false;
 let lastUiUpdate = 0;
 let lastFrameTime = performance.now();
 let frameAccumulatorMs = 0;
 let fpsMeterFrames = 0;
 let fpsMeterLastSampleAt = performance.now();
+let fpsMeterEl = null;
 let grassIndex = 0;
 for (let x = 0; x < grassPerSide; x++) {
   for (let z = 0; z < grassPerSide; z++) {
@@ -2473,7 +2431,7 @@ window.onkeyup = (e) => {
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
@@ -2646,9 +2604,20 @@ function animate(nowPerf = performance.now()) {
   updateFpsMeter();
   updateGroundTiles();
   const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
-  let matrixUpdateNodig = isOneindigSpeelveldActief()
-    ? updateCreativeGrass(now, maaierRadiusSq)
-    : cutGrassNearMowerClassic(now, maaierRadiusSq);
+  let matrixUpdateNodig = false;
+  if (isOneindigSpeelveldActief()) {
+    if (CREATIVE_UPDATE_SKIP_FRAMES <= 0) {
+      matrixUpdateNodig = updateCreativeGrass(now, maaierRadiusSq);
+    } else if (creativeUpdateSkipCounter >= CREATIVE_UPDATE_SKIP_FRAMES) {
+      creativeUpdateSkipCounter = 0;
+      matrixUpdateNodig = updateCreativeGrass(now, maaierRadiusSq);
+    } else {
+      creativeUpdateSkipCounter++;
+    }
+  } else {
+    creativeUpdateSkipCounter = 0;
+    matrixUpdateNodig = cutGrassNearMowerClassic(now, maaierRadiusSq);
+  }
 
   while (regrowQueueHead < regrowQueue.length) {
     const i = regrowQueue[regrowQueueHead];
