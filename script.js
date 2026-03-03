@@ -56,6 +56,8 @@ const BASE_GRASS_VALUE = 0.003;
 const VALUE_UPGRADE_STEP = 0.000162;
 const EARN_MULTIPLIER = 0.3;
 const SHOP_MULTIPLIER_STEP = 1.1;
+const REBIRTH_GELD_PER_PUNT = 500000;
+const REBIRTH_MULTIPLIER_STEP = 0.08;
 const BASE_SPEED = 0.07;
 const BASE_TURN_SPEED = 0.045;
 const SPEED_UPGRADE_STEP = 0.01782;
@@ -82,8 +84,11 @@ let regrowDelay = 8000,
   creativeSpeed = 0.5,
   autoSaveOnd = false;
 let fpsMeterOnd = false;
+let fullscreenOnd = false;
 let oneindigSpeelveldOnd = false;
 let verdienMultiplier = 1;
+let rebirthPoints = 0;
+let rebirthCount = 0;
 let totaalSpeeltijdSec = 0;
 let totaalVerdiendVoorTrofeeen = 0;
 let lichtKleur = "default";
@@ -93,16 +98,29 @@ let miniGameKnopZichtbaar = false;
 let miniGameVolgendeCheckAt = 0;
 let miniGameCooldownTot = 0;
 let miniGameTimer = null;
+let miniGameTimeout = null;
 let miniGameActief = false;
+let miniGameType = null;
+let miniGameLaatsteType = null;
 let miniGameMarkerPos = 0;
 let miniGameMarkerRichting = 1;
+let miniGameReactieReady = false;
+let miniGameReactieStartAt = 0;
+let miniGameKlikCount = 0;
+let miniGameKlikEindAt = 0;
 const MINIGAME_CHECK_INTERVAL_MS = 15000;
 const MINIGAME_KANS = 0.18;
 const MINIGAME_COOLDOWN_MS = 45000;
 const MINIGAME_REWARD_DIAMANT = 1;
 const MINIGAME_KNOP_DUUR_MS = 30000;
+const MINIGAME_TYPES = ["precisie", "reactie", "klik"];
 const MINIGAME_RONDES = 3;
 const MINIGAME_ZONE_BREEDTES = [24, 16, 10];
+const MINIGAME_REACTIE_MIN_DELAY_MS = 1000;
+const MINIGAME_REACTIE_MAX_DELAY_MS = 2800;
+const MINIGAME_REACTIE_GOED_MS = 700;
+const MINIGAME_KLIK_DOEL = 18;
+const MINIGAME_KLIK_DUUR_MS = 6000;
 let miniGameRonde = 1;
 let miniGameKnopZichtbaarTot = 0;
 let basicStateVoorCreative = null;
@@ -119,30 +137,6 @@ const CHAT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const CHAT_CLEANUP_BATCH_SIZE = 100;
 const ONLINE_SPELER_WINDOW_MS = 45 * 1000;
 const ONLINE_SPELER_REFRESH_MS = 20 * 1000;
-const TROFEE_DREMPELS = [
-  100,
-  1000,
-  10000,
-  100000,
-  1000000,
-  10000000,
-  100000000,
-  1000000000,
-  10000000000,
-  100000000000,
-];
-const TROFEE_BELONINGEN = [
-  50,
-  250,
-  2000,
-  15000,
-  120000,
-  900000,
-  7000000,
-  50000000,
-  350000000,
-  2500000000,
-];
 const firebaseConfig = {
   apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
   authDomain: "grasmaaier-accaunts.firebaseapp.com",
@@ -209,6 +203,7 @@ let huidigeSkin = "RED",
 const alleSkinKleuren = {
   RED: 0xff0000,
   BLUE: 0x0000ff,
+  JOKER: 0x7d3cff,
   JANUARI: 0xffffff,
   FEBRUARI: 0xffc0cb,
   MAART: 0xffd700,
@@ -228,6 +223,13 @@ const skinVisualOverrides = {
     emissiveIntensity: 0.42,
     specular: 0xd6e4ff,
     shininess: 90,
+  },
+  JOKER: {
+    color: 0x7d3cff,
+    emissive: 0x1f8f4a,
+    emissiveIntensity: 0.48,
+    specular: 0xe9ff66,
+    shininess: 120,
   },
   JANUARI: {
     emissive: 0x6f6f8a,
@@ -314,6 +316,16 @@ let mowerBlueAuraLight = null;
 let blueAuraPulse = 0;
 const normalizeGameMode = (mode) =>
   mode === "creative" ? "creative" : "classic";
+const isFullscreenActief = () =>
+  Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+const syncFullscreenState = () => {
+  fullscreenOnd = isFullscreenActief();
+  const fullscreenBtn = document.getElementById("fullscreenToggleBtn");
+  if (fullscreenBtn) {
+    fullscreenBtn.style.background = fullscreenOnd ? "#2ecc71" : "#444";
+    fullscreenBtn.textContent = `FULLSCREEN: ${fullscreenOnd ? "AAN" : "UIT"}`;
+  }
+};
 const getSaveDocRef = (uid) =>
   doc(firebaseDb, FIREBASE_SAVE_COLLECTION, String(uid));
 const escapeHtml = (value) =>
@@ -345,18 +357,6 @@ const getAccountLabel = () => {
     return ingelogdeGebruiker.email.split("@")[0].toUpperCase();
   return "GOOGLE ACCOUNT";
 };
-const getTrofeeProgressVerdiend = () =>
-  Math.max(0, totaalVerdiendVoorTrofeeen + totaalVerdiend);
-const getVrijgespeeldeTrofeeen = () => {
-  const totaal = getTrofeeProgressVerdiend();
-  let unlocked = 0;
-  for (const drempel of TROFEE_DREMPELS) {
-    if (totaal >= drempel) unlocked++;
-  }
-  return unlocked;
-};
-const getTrofeeBeloning = (trofeeLevel) =>
-  TROFEE_BELONINGEN[Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))];
 const isOneindigSpeelveldActief = () =>
   gameMode === "creative" || oneindigSpeelveldOnd;
 const getChatDisplayName = () => {
@@ -797,8 +797,9 @@ document.addEventListener(
 ui.innerHTML = `
     <div id="geldDisp" style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.8); padding:15px 30px; border-radius:15px; border:4px solid #2ecc71; pointer-events:auto; color:#2ecc71; font-size:45px;">$ 0.00</div>
     <div id="diamantDisp" style="position:absolute; top:145px; right:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #5dade2; pointer-events:auto; color:#85c1e9; font-size:30px; text-align:right;">DIAMANTEN: 0</div>
+    <div id="rebirthDisp" style="position:absolute; top:235px; right:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #16a085; pointer-events:auto; color:#76d7c4; font-size:24px; text-align:right;">REBIRTH: 0</div>
     <div id="trofeeDisp" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:10px 25px; border-radius:15px; border:4px solid #f1c40f; pointer-events:auto; text-align:right;"></div>
-    <div id="miniGameSlot" style="position:absolute; top:300px; right:20px; pointer-events:auto;"></div>
+    <div id="miniGameSlot" style="position:absolute; top:365px; right:20px; pointer-events:auto;"></div>
     <button onclick="window.openSettings()" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:white; border:3px solid white; padding:10px 30px; border-radius:15px; font-size:20px; cursor:pointer; pointer-events:auto; font-family:Impact;">INSTELLINGEN</button>
     <div id="fpsDisp" style="position:absolute; top:72px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.78); border:3px solid #7f8c8d; color:#ecf0f1; padding:7px 14px; border-radius:12px; font-size:20px; pointer-events:none; display:none;">FPS: --</div>
     <button id="shopBtn" onclick="window.openShop()" style="position:absolute; top:220px; right:20px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
@@ -827,6 +828,7 @@ window.updateUI = () => {
   };
   setDisplay("geldDisp", !isCreative);
   setDisplay("diamantDisp", !isCreative);
+  setDisplay("rebirthDisp", !isCreative);
   setDisplay("trofeeDisp", !isCreative);
   setDisplay("miniGameSlot", !isCreative);
   setDisplay("shopBtn", !isCreative);
@@ -853,7 +855,9 @@ window.updateUI = () => {
     `$ ${geld.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   document.getElementById("diamantDisp").innerText =
     `DIAMANTEN: ${diamanten.toLocaleString()}`;
-  trofeeen = getVrijgespeeldeTrofeeen();
+  document.getElementById("rebirthDisp").innerText =
+    `REBIRTH: ${rebirthPoints.toLocaleString()} (x${window.getRebirthMultiplier().toFixed(2)})`;
+  trofeeen = Math.floor((totaalVerdiendVoorTrofeeen + totaalVerdiend) / 100000);
   const miniGameBtnHtml = miniGameKnopZichtbaar
     ? `<button id="miniGameBtn" style="margin-top:8px; background:#16a085; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">MINIGAME</button>`
     : "";
@@ -1008,6 +1012,8 @@ window.maakBasicSnapshot = () => ({
   shopUpgradeLevel,
   shopUpgradePrijs,
   verdienMultiplier,
+  rebirthPoints,
+  rebirthCount,
   radDraaiCount,
   creativeSpeed,
   gebruikteRedeemCodes: [...gebruikteRedeemCodes],
@@ -1025,10 +1031,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   totaalGemaaid = snapshot.totaalGemaaid;
   totaalUpgrades = snapshot.totaalUpgrades;
   diamanten = snapshot.diamanten;
-  geclaimdeTrofeeen = Number.isFinite(snapshot.geclaimdeTrofeeen)
-    ? snapshot.geclaimdeTrofeeen
-    : 0;
-  geclaimdeTrofeeen = Math.max(0, Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen));
+  geclaimdeTrofeeen = snapshot.geclaimdeTrofeeen;
   grasWaarde = snapshot.grasWaarde;
   huidigeSnelheid = snapshot.huidigeSnelheid;
   huidigMowerRadius = snapshot.huidigMowerRadius;
@@ -1052,6 +1055,10 @@ window.herstelBasicSnapshot = (snapshot) => {
   shopUpgradeLevel = snapshot.shopUpgradeLevel;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
   verdienMultiplier = snapshot.verdienMultiplier;
+  rebirthPoints = Number.isFinite(snapshot.rebirthPoints)
+    ? snapshot.rebirthPoints
+    : 0;
+  rebirthCount = Number.isFinite(snapshot.rebirthCount) ? snapshot.rebirthCount : 0;
   radDraaiCount = snapshot.radDraaiCount;
   creativeSpeed = snapshot.creativeSpeed;
   gebruikteRedeemCodes = Array.isArray(snapshot.gebruikteRedeemCodes)
@@ -1171,31 +1178,14 @@ window.toggleGameMode = () => {
 window.openTrofee = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  trofeeen = getVrijgespeeldeTrofeeen();
-  const progress = getTrofeeProgressVerdiend();
-  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">TROFEEENPAD</h1><p style="margin-bottom:10px;">Progressie op basis van totaal verdiend</p><p style="margin-bottom:20px; color:#95a5a6;">TOTAAL: $${progress.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>`;
-  for (let i = 1; i <= TROFEE_DREMPELS.length; i++) {
+  let h = `<div style="background:#111; padding:40px; border:8px solid #f1c40f; border-radius:30px; text-align:center; min-width:500px; max-height:85vh; overflow-y:auto;"><h1 style="color:#f1c40f; font-size:55px;">TROFEEENPAD</h1><p style="margin-bottom:20px;">VERDIEN $100.000 VOOR EEN  TROFEE</p>`;
+  for (let i = 1; i <= 10; i++) {
     let geclaimd = i <= geclaimdeTrofeeen,
       kan = i <= trofeeen && !geclaimd;
-    const drempel = TROFEE_DREMPELS[i - 1];
-    const vorigeDrempel = i === 1 ? 0 : TROFEE_DREMPELS[i - 2];
-    const stapDoel = Math.max(1, drempel - vorigeDrempel);
-    const stapVoortgang = Math.max(0, Math.min(stapDoel, progress - vorigeDrempel));
-    const stapPct = geclaimd ? 100 : Math.max(0, Math.min(100, (stapVoortgang / stapDoel) * 100));
-    const belBedrag = getTrofeeBeloning(i);
-    const bel = i === 10
-      ? `$${belBedrag.toLocaleString()} + BLUE SKIN`
-      : `$${belBedrag.toLocaleString()}`;
+    let belBedrag = i * 7500,
+      bel = i === 10 ? "BLUE SKIN" : `$${belBedrag.toLocaleString()}`;
     h += `<div style="padding:20px; margin:10px; background:#222; border-radius:15px; display:flex; justify-content:space-between; align-items:center; border:3px solid ${geclaimd ? "#2ecc71" : kan ? "#f1c40f" : "#444"};">
-            <div style="text-align:left; min-width:320px;">
-              <div style="font-size:24px;">TROFEE ${i}</div>
-              <div style="color:#aaa;">VEREIST: $${drempel.toLocaleString()}</div>
-              <div style="color:#aaa;">BELONING: ${bel}</div>
-              <div style="width:100%; height:16px; background:#111827; border:2px solid #555; border-radius:10px; margin-top:8px; overflow:hidden;">
-                <div style="width:${stapPct}%; height:100%; background:${geclaimd || kan ? "#2ecc71" : "#f1c40f"};"></div>
-              </div>
-              <div style="color:#95a5a6; font-size:14px; margin-top:4px;">${Math.floor(stapPct)}% (${Math.floor(stapVoortgang).toLocaleString()}/${Math.floor(stapDoel).toLocaleString()})</div>
-            </div>
+            <div style="text-align:left;"><div style="font-size:24px;">TROFEE ${i}</div><div style="color:#aaa;">BELONING: ${bel}</div></div>
             ${geclaimd ? "CLAIMED" : kan ? `<button onclick="window.claimT(${i})" style="background:#2ecc71; color:white; border:none; padding:12px 25px; border-radius:10px; cursor:pointer; font-family:Impact; font-size:18px;">CLAIM</button>` : "LOCKED"}
         </div>`;
   }
@@ -1298,7 +1288,51 @@ window.cleanupMiniGame = () => {
     clearInterval(miniGameTimer);
     miniGameTimer = null;
   }
+  if (miniGameTimeout) {
+    clearTimeout(miniGameTimeout);
+    miniGameTimeout = null;
+  }
+  miniGameReactieReady = false;
+  miniGameReactieStartAt = 0;
+  miniGameKlikCount = 0;
+  miniGameKlikEindAt = 0;
   miniGameActief = false;
+  miniGameType = null;
+};
+
+window.finishMiniGame = (gewonnen, succesTekst = "", failTekst = "") => {
+  window.cleanupMiniGame();
+  miniGameKnopZichtbaar = false;
+  miniGameKnopZichtbaarTot = 0;
+  miniGameCooldownTot = Date.now() + MINIGAME_COOLDOWN_MS;
+  miniGameVolgendeCheckAt = miniGameCooldownTot + MINIGAME_CHECK_INTERVAL_MS;
+
+  if (gewonnen) {
+    diamanten += MINIGAME_REWARD_DIAMANT;
+    const tekst =
+      succesTekst || `Je kreeg ${MINIGAME_REWARD_DIAMANT} diamant.`;
+    overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #2ecc71; border-radius:30px; text-align:center; min-width:560px;">
+      <h1 style="color:#2ecc71; font-size:58px; margin:0;">GESLAAGD!</h1>
+      <p style="font-size:28px; margin-top:15px;">${tekst}</p>
+      <button onclick="window.sluit()" style="margin-top:18px; padding:14px 50px; background:#2ecc71; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
+    </div>`;
+  } else {
+    const tekst = failTekst || "Probeer het straks opnieuw.";
+    overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #e74c3c; border-radius:30px; text-align:center; min-width:560px;">
+      <h1 style="color:#e74c3c; font-size:58px; margin:0;">MISLUKT</h1>
+      <p style="font-size:26px; margin-top:15px;">${tekst}</p>
+      <button onclick="window.sluit()" style="margin-top:18px; padding:14px 50px; background:#e74c3c; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
+    </div>`;
+  }
+  window.updateUI();
+};
+
+window.kiesVolgendeMiniGameType = () => {
+  const opties = MINIGAME_TYPES.filter((type) => type !== miniGameLaatsteType);
+  const pool = opties.length ? opties : MINIGAME_TYPES;
+  const gekozen = pool[Math.floor(Math.random() * pool.length)];
+  miniGameLaatsteType = gekozen;
+  return gekozen;
 };
 
 window.openMiniGame = () => {
@@ -1310,6 +1344,20 @@ window.openMiniGame = () => {
   miniGameKnopZichtbaarTot = 0;
   window.cleanupMiniGame();
   miniGameActief = true;
+  const gekozen = window.kiesVolgendeMiniGameType();
+  if (gekozen === "reactie") {
+    window.startMiniGameReactie();
+    return;
+  }
+  if (gekozen === "klik") {
+    window.startMiniGameKlik();
+    return;
+  }
+  window.startMiniGamePrecisie();
+};
+
+window.startMiniGamePrecisie = () => {
+  miniGameType = "precisie";
   miniGameRonde = 1;
   miniGameMarkerPos = 0;
   miniGameMarkerRichting = 1;
@@ -1318,8 +1366,7 @@ window.openMiniGame = () => {
 
   miniGameTimer = setInterval(() => {
     const marker = document.getElementById("miniGameMarker");
-    if (!marker) {
-      window.cleanupMiniGame();
+    if (!miniGameActief || miniGameType !== "precisie" || !marker) {
       return;
     }
     miniGameMarkerPos += miniGameMarkerRichting * 1.9;
@@ -1332,6 +1379,124 @@ window.openMiniGame = () => {
     }
     marker.style.left = `${miniGameMarkerPos}%`;
   }, 16);
+};
+
+window.startMiniGameReactie = () => {
+  miniGameType = "reactie";
+  miniGameReactieReady = false;
+  miniGameReactieStartAt = 0;
+  window.renderMiniGameReactie("Wacht op het groene signaal...");
+  const wachttijd =
+    MINIGAME_REACTIE_MIN_DELAY_MS +
+    Math.floor(
+      Math.random() *
+        (MINIGAME_REACTIE_MAX_DELAY_MS - MINIGAME_REACTIE_MIN_DELAY_MS + 1),
+    );
+  miniGameTimeout = setTimeout(() => {
+    if (!miniGameActief || miniGameType !== "reactie") return;
+    miniGameReactieReady = true;
+    miniGameReactieStartAt = Date.now();
+    window.renderMiniGameReactie("NU! Klik zo snel mogelijk op STOP.", true);
+  }, wachttijd);
+};
+
+window.renderMiniGameReactie = (statusTekst, ready = false) => {
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #16a085; border-radius:30px; text-align:center; min-width:560px;">
+      <h1 style="color:#1abc9c; font-size:56px; margin:0 0 8px 0;">MINIGAME - REACTIE</h1>
+      <p style="font-size:22px; margin:0 0 18px 0;">Klik niet te vroeg. Wacht tot het signaal.</p>
+      <div style="width:500px; margin:0 auto; padding:18px; border-radius:12px; border:3px solid white; background:${ready ? "#1f8f4f" : "#2c3e50"}; font-size:28px;">
+        ${ready ? "KLIK NU!" : "WACHT..."}
+      </div>
+      <p style="font-size:20px; color:#d0ece7; min-height:24px; margin:12px 0 0 0;">${statusTekst}</p>
+      <button onclick="window.stopMiniGameReactie()" style="margin-top:22px; padding:14px 54px; background:${ready ? "#e67e22" : "#666"}; color:white; border:none; border-radius:12px; font-family:Impact; font-size:30px; cursor:pointer;">STOP</button>
+      <br><button onclick="window.sluit()" style="margin-top:16px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button>
+    </div>`;
+};
+
+window.stopMiniGameReactie = () => {
+  if (!miniGameActief || miniGameType !== "reactie") return;
+  if (!miniGameReactieReady) {
+    window.finishMiniGame(false, "", "Te vroeg geklikt. Dat was een false start.");
+    return;
+  }
+  const reactieMs = Math.max(0, Date.now() - miniGameReactieStartAt);
+  if (reactieMs <= MINIGAME_REACTIE_GOED_MS) {
+    window.finishMiniGame(
+      true,
+      `Reactietijd: ${reactieMs} ms. Je kreeg ${MINIGAME_REWARD_DIAMANT} diamant.`,
+    );
+    return;
+  }
+  window.finishMiniGame(
+    false,
+    "",
+    `Te traag (${reactieMs} ms). Nodig: ${MINIGAME_REACTIE_GOED_MS} ms of sneller.`,
+  );
+};
+
+window.startMiniGameKlik = () => {
+  miniGameType = "klik";
+  miniGameKlikCount = 0;
+  miniGameKlikEindAt = Date.now() + MINIGAME_KLIK_DUUR_MS;
+  window.renderMiniGameKlik();
+  window.updateMiniGameKlikStatus();
+  miniGameTimer = setInterval(() => {
+    if (!miniGameActief || miniGameType !== "klik") return;
+    window.updateMiniGameKlikStatus();
+    if (Date.now() >= miniGameKlikEindAt) {
+      window.finishMiniGame(
+        false,
+        "",
+        `Tijd op. Je haalde ${miniGameKlikCount}/${MINIGAME_KLIK_DOEL} klikken.`,
+      );
+    }
+  }, 80);
+};
+
+window.renderMiniGameKlik = () => {
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #16a085; border-radius:30px; text-align:center; min-width:560px;">
+      <h1 style="color:#1abc9c; font-size:56px; margin:0 0 8px 0;">MINIGAME - KLIK RUSH</h1>
+      <p style="font-size:22px; margin:0 0 18px 0;">Haal ${MINIGAME_KLIK_DOEL} klikken binnen ${(
+        MINIGAME_KLIK_DUUR_MS / 1000
+      ).toFixed(0)} seconden.</p>
+      <div id="miniGameKlikProgress" style="font-size:34px; color:#f1c40f;">0 / ${MINIGAME_KLIK_DOEL}</div>
+      <div id="miniGameKlikTijd" style="font-size:24px; color:#d0ece7; margin-top:6px;">Tijd: --</div>
+      <button id="miniGameKlikBtn" onclick="window.clickMiniGameKlik()" style="margin-top:20px; padding:16px 56px; background:#e67e22; color:white; border:none; border-radius:12px; font-family:Impact; font-size:32px; cursor:pointer;">KLIK!</button>
+      <br><button onclick="window.sluit()" style="margin-top:16px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button>
+    </div>`;
+};
+
+window.updateMiniGameKlikStatus = () => {
+  const progressEl = document.getElementById("miniGameKlikProgress");
+  const tijdEl = document.getElementById("miniGameKlikTijd");
+  const btnEl = document.getElementById("miniGameKlikBtn");
+  const resterend = Math.max(0, miniGameKlikEindAt - Date.now());
+  if (progressEl) {
+    progressEl.innerText = `${miniGameKlikCount} / ${MINIGAME_KLIK_DOEL}`;
+  }
+  if (tijdEl) {
+    tijdEl.innerText = `Tijd: ${(resterend / 1000).toFixed(2)}s`;
+  }
+  if (btnEl) {
+    btnEl.disabled =
+      !miniGameActief || miniGameType !== "klik" || miniGameKlikCount >= MINIGAME_KLIK_DOEL;
+  }
+};
+
+window.clickMiniGameKlik = () => {
+  if (!miniGameActief || miniGameType !== "klik") return;
+  miniGameKlikCount++;
+  window.updateMiniGameKlikStatus();
+  if (miniGameKlikCount >= MINIGAME_KLIK_DOEL) {
+    window.finishMiniGame(
+      true,
+      `Je haalde ${miniGameKlikCount} klikken op tijd. +${MINIGAME_REWARD_DIAMANT} diamant.`,
+    );
+  }
 };
 
 window.getMiniGameZone = () => {
@@ -1347,7 +1512,7 @@ window.renderMiniGame = (statusTekst = "") => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #16a085; border-radius:30px; text-align:center; min-width:560px;">
-      <h1 style="color:#1abc9c; font-size:56px; margin:0 0 8px 0;">MINIGAME</h1>
+      <h1 style="color:#1abc9c; font-size:56px; margin:0 0 8px 0;">MINIGAME - PRECISIE</h1>
       <p style="font-size:24px; margin:0 0 6px 0;">Ronde ${miniGameRonde}/${MINIGAME_RONDES}</p>
       <p style="font-size:22px; margin:0 0 18px 0;">Klik STOP als de marker in de groene zone zit.</p>
       <div style="position:relative; width:480px; height:34px; margin:0 auto; background:#2c3e50; border:3px solid white; border-radius:12px; overflow:hidden;">
@@ -1361,7 +1526,7 @@ window.renderMiniGame = (statusTekst = "") => {
 };
 
 window.stopMiniGame = () => {
-  if (!miniGameActief) return;
+  if (!miniGameActief || miniGameType !== "precisie") return;
   const zone = window.getMiniGameZone();
   const gewonnen =
     miniGameMarkerPos >= zone.start && miniGameMarkerPos <= zone.einde;
@@ -1374,36 +1539,24 @@ window.stopMiniGame = () => {
     return;
   }
 
-  window.cleanupMiniGame();
-  miniGameKnopZichtbaar = false;
-  miniGameKnopZichtbaarTot = 0;
-  miniGameCooldownTot = Date.now() + MINIGAME_COOLDOWN_MS;
-  miniGameVolgendeCheckAt = miniGameCooldownTot + MINIGAME_CHECK_INTERVAL_MS;
-
   if (gewonnen) {
-    diamanten += MINIGAME_REWARD_DIAMANT;
-    overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #2ecc71; border-radius:30px; text-align:center; min-width:560px;">
-      <h1 style="color:#2ecc71; font-size:58px; margin:0;">GESLAAGD!</h1>
-      <p style="font-size:28px; margin-top:15px;">Je kreeg ${MINIGAME_REWARD_DIAMANT} diamant.</p>
-      <button onclick="window.sluit()" style="margin-top:18px; padding:14px 50px; background:#2ecc71; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
-    </div>`;
+    window.finishMiniGame(
+      true,
+      `Perfect! Je kreeg ${MINIGAME_REWARD_DIAMANT} diamant.`,
+    );
   } else {
-    overlay.innerHTML = `<div style="background:#111; padding:50px; border:8px solid #e74c3c; border-radius:30px; text-align:center; min-width:560px;">
-      <h1 style="color:#e74c3c; font-size:58px; margin:0;">MISLUKT</h1>
-      <p style="font-size:26px; margin-top:15px;">Probeer het straks opnieuw.</p>
-      <button onclick="window.sluit()" style="margin-top:18px; padding:14px 50px; background:#e74c3c; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
-    </div>`;
+    window.finishMiniGame(false);
   }
-  window.updateUI();
 };
 
 window.claimT = (i) => {
   if (i === geclaimdeTrofeeen + 1) {
     geclaimdeTrofeeen++;
-    geld += getTrofeeBeloning(i); // Trofee-beloningen verhogen alleen geld, niet totaalVerdiend.
     if (i === 10) {
-      if (!ontgrendeldeSkins.includes("BLUE")) ontgrendeldeSkins.push("BLUE");
-      alert("LEGENDARISCH! BLUE SKIN VRIJGESPEELD");
+      ontgrendeldeSkins.push("BLUE");
+      alert("LEGENDARISCH!");
+    } else {
+      window.geefGeld(i * 7500);
     }
     window.openTrofee();
     window.updateUI();
@@ -1417,6 +1570,9 @@ window.openShop = () => {
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
   const volgendeMulti = (verdienMultiplier * SHOP_MULTIPLIER_STEP).toFixed(2);
+  const rebirthMulti = window.getRebirthMultiplier();
+  const totaalMulti = verdienMultiplier * rebirthMulti;
+  const rebirthPuntenBeschikbaar = window.getRebirthPuntenBeschikbaar();
   const radKost = window.getRadKost();
   overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px;">
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
@@ -1424,7 +1580,14 @@ window.openShop = () => {
         <p style="font-size:26px; margin:10px 0 25px 0;">Diamanten: <span style="color:#85c1e9;">${diamanten}</span></p>
         <div style="width:100%; padding:14px; background:#1f2937; color:#93c5fd; border:3px solid #334155; border-radius:14px; font-family:Impact; font-size:22px; margin-bottom:12px;">DIAMANTEN KRIJG JE VIA GRASS PASS</div>
         <button onclick="window.koopShopUpgrade()" style="width:100%; padding:18px; background:${diamanten >= shopUpgradePrijs ? "#27ae60" : "#555"}; color:white; border:3px solid white; border-radius:14px; cursor:${diamanten >= shopUpgradePrijs ? "pointer" : "default"}; font-family:Impact; font-size:25px;">VERDIENSTEN x1.1 (${shopUpgradePrijs}D)</button>
-        <p style="font-size:22px; color:#ccc; margin-top:18px;">Huidig: x${verdienMultiplier.toFixed(2)} | Volgend: x${volgendeMulti}</p>
+        <p style="font-size:22px; color:#ccc; margin-top:18px;">Shop: x${verdienMultiplier.toFixed(2)} | Volgend: x${volgendeMulti}</p>
+        <div style="margin-top:18px; padding:16px; background:#143e36; border:3px solid #16a085; border-radius:14px;">
+          <div style="font-size:26px; color:#76d7c4; margin-bottom:8px;">REBIRTH</div>
+          <p style="font-size:20px; margin:0 0 8px 0; color:#d1fae5;">Permanent bonus: x${rebirthMulti.toFixed(2)} (${rebirthPoints} RP)</p>
+          <p style="font-size:18px; margin:0 0 12px 0; color:#a7f3d0;">Beschikbaar nu: +${rebirthPuntenBeschikbaar} RP (op basis van totaal verdiend)</p>
+          <button onclick="window.doRebirth()" style="width:100%; padding:16px; background:${rebirthPuntenBeschikbaar > 0 ? "#16a085" : "#555"}; color:white; border:3px solid white; border-radius:12px; cursor:${rebirthPuntenBeschikbaar > 0 ? "pointer" : "default"}; font-family:Impact; font-size:24px;">REBIRTH (+${rebirthPuntenBeschikbaar} RP)</button>
+        </div>
+        <p style="font-size:22px; color:#f8f9fa; margin-top:16px;">Totale verdiensten: x${totaalMulti.toFixed(2)}</p>
         <div style="margin-top:22px; padding:16px; background:#2d1f3a; border:3px solid #8e44ad; border-radius:14px;">
           <div style="font-size:26px; color:#d2b4de; margin-bottom:8px;"> LUCKY RAD</div>
           <p style="font-size:20px; margin:0 0 12px 0; color:#e8daef;">Beloningen groeien geleidelijk met je progressie.</p>
@@ -1433,6 +1596,82 @@ window.openShop = () => {
         </div>
         <button onclick="window.sluit()" style="margin-top:16px; padding:14px 50px; background:#5dade2; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
     </div>`;
+};
+
+window.getRebirthPuntenBeschikbaar = () =>
+  Math.floor(Math.sqrt(Math.max(0, totaalVerdiend) / REBIRTH_GELD_PER_PUNT));
+
+window.getRebirthMultiplier = () =>
+  1 + Math.max(0, rebirthPoints) * REBIRTH_MULTIPLIER_STEP;
+
+window.geefGeld = (
+  basisBedrag,
+  { gebruikRebirthMultiplier = true, telVoorTotaal = true } = {},
+) => {
+  const bedrag = Number.isFinite(basisBedrag) ? basisBedrag : 0;
+  const multiplier = gebruikRebirthMultiplier ? window.getRebirthMultiplier() : 1;
+  const toegevoegd = Math.round(bedrag * multiplier * 100) / 100;
+  geld += toegevoegd;
+  if (telVoorTotaal) totaalVerdiend += toegevoegd;
+  return toegevoegd;
+};
+
+window.doRebirth = () => {
+  if (gameMode === "creative") {
+    alert("Rebirth is alleen beschikbaar in classic mode.");
+    return;
+  }
+  const punten = window.getRebirthPuntenBeschikbaar();
+  if (punten < 1) {
+    alert(
+      `Je hebt meer progressie nodig. Verdien minstens $${REBIRTH_GELD_PER_PUNT.toLocaleString()} voor je eerste Rebirth punt.`,
+    );
+    return;
+  }
+  const akkoord = confirm(
+    `Rebirth geeft je +${punten} RP permanent, maar reset je geld, upgrades en level-progressie. Doorgaan?`,
+  );
+  if (!akkoord) return;
+
+  rebirthPoints += punten;
+  rebirthCount++;
+  totaalVerdiendVoorTrofeeen += Math.max(0, totaalVerdiend);
+  geld = 0;
+  totaalVerdiend = 0;
+  totaalGemaaid = 0;
+  totaalUpgrades = 0;
+  grasWaarde = BASE_GRASS_VALUE;
+  huidigeSnelheid = BASE_SPEED;
+  huidigMowerRadius = 1.3;
+  prijsRadius = 5;
+  prijsSnelheid = 5;
+  prijsWaarde = 10;
+  countRadius = 0;
+  countSnelheid = 0;
+  countWaarde = 0;
+  gpLevel = 1;
+  eventLevel = 1;
+  actieveOpdracht = null;
+  eventOpdracht = null;
+  rewardKlaar = false;
+  eventRewardKlaar = false;
+  shopUpgradeLevel = 0;
+  shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
+  verdienMultiplier = 1;
+  totaalSpeeltijdSec = 0;
+  radDraaiCount = 0;
+  gameMode = "classic";
+  window.cleanupMiniGame();
+  miniGameKnopZichtbaar = false;
+  miniGameKnopZichtbaarTot = 0;
+  miniGameCooldownTot = 0;
+  miniGameVolgendeCheckAt = Date.now() + MINIGAME_CHECK_INTERVAL_MS;
+  window.resetClassicGrassField();
+  window.genereerMissie(false);
+  window.genereerMissie(true);
+  window.updateUI();
+  window.openShop();
+  window.save(true);
 };
 
 window.koopDiamant = () => {
@@ -1483,6 +1722,16 @@ window.geefGratisUpgrade = (type) => {
   return false;
 };
 
+window.getBeschikbareRadSkins = () => {
+  const bestaande = new Set(
+    Array.isArray(ontgrendeldeSkins)
+      ? ontgrendeldeSkins.map((skin) => String(skin).toUpperCase())
+      : [],
+  );
+  const candidates = ["BLUE", "JOKER", ...maanden];
+  return candidates.filter((skin) => !bestaande.has(skin));
+};
+
 window.kiesRadBeloning = () => {
   const factor = window.getRadProgressFactor();
   const geldKlein = Math.round(120 * factor);
@@ -1490,6 +1739,7 @@ window.kiesRadBeloning = () => {
   const geldGroot = Math.round(700 * factor);
   const diamantKlein = Math.max(1, Math.floor(1 + factor * 0.35));
   const diamantGroot = Math.max(2, Math.floor(2 + factor * 0.5));
+  const skinPool = window.getBeschikbareRadSkins();
   const pool = [
     {
       weight: 32,
@@ -1540,6 +1790,15 @@ window.kiesRadBeloning = () => {
       text: "Gratis Value Upgrade",
     },
   ];
+  if (skinPool.length) {
+    const skinNaam = skinPool[Math.floor(Math.random() * skinPool.length)];
+    pool.push({
+      weight: 1,
+      type: "skin",
+      skinNaam,
+      text: `SKIN: ${skinNaam}`,
+    });
+  }
   const totaal = pool.reduce((sum, p) => sum + p.weight, 0);
   let roll = Math.random() * totaal;
   for (const item of pool) {
@@ -1551,8 +1810,8 @@ window.kiesRadBeloning = () => {
 
 window.pasRadBeloningToe = (beloning) => {
   if (beloning.type === "geld") {
-    geld += beloning.amount;
-    return `Je won ${beloning.text}!`;
+    const gewonnen = window.geefGeld(beloning.amount);
+    return `Je won $${gewonnen.toLocaleString()} geld!`;
   }
   if (beloning.type === "diamant") {
     diamanten += beloning.amount;
@@ -1562,8 +1821,19 @@ window.pasRadBeloningToe = (beloning) => {
     const gelukt = window.geefGratisUpgrade(beloning.upgradeType);
     if (gelukt) return `Je won: ${beloning.text}!`;
     const fallback = Math.round(250 * window.getRadProgressFactor());
-    geld += fallback;
-    return `Upgrade was max, dus je kreeg $${fallback.toLocaleString()} geld!`;
+    const gekregen = window.geefGeld(fallback);
+    return `Upgrade was max, dus je kreeg $${gekregen.toLocaleString()} geld!`;
+  }
+  if (beloning.type === "skin") {
+    const skinNaam = String(beloning.skinNaam || "").toUpperCase();
+    if (!skinNaam) return "Geen beloning.";
+    if (ontgrendeldeSkins.includes(skinNaam)) {
+      const fallback = Math.round(350 * window.getRadProgressFactor());
+      const gekregen = window.geefGeld(fallback);
+      return `Skin al vrijgespeeld, dus je kreeg $${gekregen.toLocaleString()} geld!`;
+    }
+    ontgrendeldeSkins.push(skinNaam);
+    return `Zeldzame drop! Je hebt skin ${skinNaam} vrijgespeeld!`;
   }
   return "Geen beloning.";
 };
@@ -1577,6 +1847,7 @@ window.startRadAnimatie = (beloning) => {
     "Gratis Radius Upgrade",
     "Gratis Speed Upgrade",
     "Gratis Value Upgrade",
+    "Zeldzame skin drop",
   ];
   const eindTekst =
     beloning.type === "upgrade" ? beloning.text : `Je won ${beloning.text}`;
@@ -1647,7 +1918,7 @@ window.openSkins = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
-  ["RED", "BLUE", ...maanden].forEach((s) => {
+  ["RED", "BLUE", "JOKER", ...maanden].forEach((s) => {
     const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
     h += `<button class="skinSelectBtn" data-skin="${s}" data-unlocked="${ok ? "1" : "0"}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;" ${ok ? "" : "disabled"}>${ok ? s : "LOCKED"}</button>`;
@@ -1720,8 +1991,7 @@ window.claimEvent = () => {
   if (eventRewardKlaar) {
     const huidigeMaandNaam = getHuidigeMaandNaam();
     if (eventLevel !== 100) {
-      geld += 1;
-      totaalVerdiend += 1;
+      window.geefGeld(1);
     }
     if (eventLevel === 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam))
       ontgrendeldeSkins.push(huidigeMaandNaam);
@@ -1737,7 +2007,7 @@ window.toggleAutoSave = () => {
   autoSaveOnd = !autoSaveOnd;
   if (autoSaveOnd) window.save(true);
   window.openSettings();
-};
+}
 
 window.toggleLichtKleur = () => {
   lichtKleur = lichtKleur === "hemelsblauw" ? "default" : "hemelsblauw";
@@ -1755,6 +2025,29 @@ window.toggleFpsMeter = () => {
   if (fpsEl) fpsEl.innerText = "FPS: --";
   window.updateUI();
   window.openSettings();
+};
+window.toggleFullscreen = async () => {
+  try {
+    if (isFullscreenActief()) {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    } else {
+      const target = document.documentElement;
+      if (target.requestFullscreen) {
+        await target.requestFullscreen();
+      } else if (target.webkitRequestFullscreen) {
+        target.webkitRequestFullscreen();
+      }
+    }
+  } catch (err) {
+    console.error("Fullscreen wisselen mislukt:", err);
+    alert("Fullscreen kon niet worden gewijzigd.");
+  } finally {
+    syncFullscreenState();
+  }
 };
 window.toggleOneindigSpeelveld = () => {
   oneindigSpeelveldOnd = !oneindigSpeelveldOnd;
@@ -1800,6 +2093,8 @@ window.getSaveData = () => ({
   shopUpgradeLevel,
   shopUpgradePrijs,
   verdienMultiplier,
+  rebirthPoints,
+  rebirthCount,
   totaalSpeeltijdSec,
   lichtKleur,
   radDraaiCount,
@@ -1823,7 +2118,6 @@ window.applySaveData = (d) => {
     d.geclaimdeTrofeeen ?? d.geclaimdeTrofeeën ?? d["geclaimdeTrofeeÃ«n"] ?? 0;
   if (!Number.isFinite(geclaimdeTrofeeen) || geclaimdeTrofeeen < 0)
     geclaimdeTrofeeen = 0;
-  geclaimdeTrofeeen = Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen);
   grasWaarde = Number.isFinite(d.grasWaarde) ? d.grasWaarde : BASE_GRASS_VALUE;
   huidigeSnelheid = Number.isFinite(d.huidigeSnelheid)
     ? d.huidigeSnelheid
@@ -1867,6 +2161,8 @@ window.applySaveData = (d) => {
   verdienMultiplier = Number.isFinite(d.verdienMultiplier)
     ? d.verdienMultiplier
     : Math.pow(SHOP_MULTIPLIER_STEP, shopUpgradeLevel);
+  rebirthPoints = Number.isFinite(d.rebirthPoints) ? d.rebirthPoints : 0;
+  rebirthCount = Number.isFinite(d.rebirthCount) ? d.rebirthCount : 0;
   totaalSpeeltijdSec = Number.isFinite(d.totaalSpeeltijdSec)
     ? d.totaalSpeeltijdSec
     : 0;
@@ -1875,6 +2171,7 @@ window.applySaveData = (d) => {
   radDraaiCount = Number.isFinite(d.radDraaiCount) ? d.radDraaiCount : 0;
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   fpsMeterOnd = Boolean(d.fpsMeterOnd);
+  fullscreenOnd = isFullscreenActief();
   oneindigSpeelveldOnd = Boolean(d.oneindigSpeelveldOnd);
   gebruikteRedeemCodes = Array.isArray(d.gebruikteRedeemCodes)
     ? d.gebruikteRedeemCodes
@@ -2045,6 +2342,7 @@ window.openResetConfirm = () => {
 };
 
 window.openSettings = () => {
+  syncFullscreenState();
   const accountNaam = getAccountLabel();
   const accountKnopTekst = ingelogdeGebruiker ? "UITLOGGEN" : "INLOGGEN MET GOOGLE";
   const accountKnopKleur = ingelogdeGebruiker ? "#e67e22" : "#4285f4";
@@ -2057,6 +2355,7 @@ window.openSettings = () => {
         <button onclick="window.toggleOneindigSpeelveld()" style="width:400px; padding:20px; background:${oneindigSpeelveldOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ONEINDIG SPEELVELD: ${oneindigSpeelveldOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
         <button onclick="window.toggleFpsMeter()" style="width:400px; padding:20px; background:${fpsMeterOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FPS METER: ${fpsMeterOnd ? "AAN" : "UIT"}</button><br>
+        <button id="fullscreenToggleBtn" onclick="window.toggleFullscreen()" style="width:400px; padding:20px; background:${fullscreenOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FULLSCREEN: ${fullscreenOnd ? "AAN" : "UIT"}</button><br>
         <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
         <button onclick="window.toggleGoogleLogin()" style="width:400px; padding:18px; background:${accountKnopKleur}; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">${accountKnopTekst}</button><br>
         <button onclick="window.openInfoPage()" style="width:400px; padding:16px; background:#1f2937; color:#93c5fd; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">INFO PAGINA</button><br>
@@ -2073,7 +2372,7 @@ window.openCheat = () => {
 
   let gelukt = false;
   if (c === "YEAHMAN") {
-    geld += 1000;
+    window.geefGeld(1000);
     gelukt = true;
   }
   if (c === "MINIGAME123") {
@@ -2493,8 +2792,7 @@ function cutGrassAtIndex(i, now) {
   grassMesh.setMatrixAt(i, grassDummy.matrix);
   if (gameMode === "classic") {
     const opbrengst = grasWaarde * EARN_MULTIPLIER * verdienMultiplier;
-    geld += opbrengst;
-    totaalVerdiend += opbrengst;
+    window.geefGeld(opbrengst);
     totaalGemaaid++;
     uiDirty = true;
   }
@@ -2724,6 +3022,8 @@ function animate(nowPerf = performance.now()) {
 }
 
 // --- 8. STARTUP ---
+window.addEventListener("fullscreenchange", syncFullscreenState);
+window.addEventListener("webkitfullscreenchange", syncFullscreenState);
 buildChatUi();
 const isGeladen = window.load();
 if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
