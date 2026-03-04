@@ -3670,12 +3670,20 @@ window.toggleGoogleLogin = async () => {
 };
 
 window.save = async (silent = false) => {
-  const moetLokaalOpslaan = autoSaveOnd || silent;
-  const moetCloudOpslaan = Boolean(ingelogdeGebruiker && firebaseDb);
+  // Lokale autosave altijd aan als veiligheidsnet.
+  const moetLokaalOpslaan = true;
+  // Cloud save enkel bij expliciete save of wanneer autosave toggle aan staat.
+  const moetCloudOpslaan = Boolean(
+    ingelogdeGebruiker && firebaseDb && (autoSaveOnd || silent),
+  );
   if (!moetLokaalOpslaan && !moetCloudOpslaan) return;
 
   const data = window.getSaveData();
-  localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
+  try {
+    localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
+  } catch (err) {
+    console.error("Lokale save mislukt:", err);
+  }
 
   if (moetCloudOpslaan) {
     try {
