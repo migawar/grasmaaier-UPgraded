@@ -138,6 +138,13 @@ const MULTIPLAYER_SERVERS = [
   { id: "US-1", naam: "AMERICA #1", regio: "Verenigde Staten", accent: "#f59e0b" },
   { id: "ASIA-1", naam: "ASIA #1", regio: "Azie", accent: "#34d399" },
 ];
+const DIAMANT_SKINS_SHOP = [
+  { id: "PLATINUM", naam: "PLATINUM", prijs: 120, kleur: "#d1d5db" },
+  { id: "OBSIDIAN", naam: "OBSIDIAN", prijs: 260, kleur: "#111827" },
+  { id: "NEON", naam: "NEON", prijs: 450, kleur: "#22d3ee" },
+  { id: "VOID", naam: "VOID", prijs: 800, kleur: "#7c3aed" },
+];
+const DIAMANT_SKIN_IDS = DIAMANT_SKINS_SHOP.map((skin) => skin.id);
 const TROFEE_DREMPELS = [
   100,
   1000,
@@ -234,6 +241,10 @@ const alleSkinKleuren = {
   STARTER: 0x3f8f2f,
   RED: 0xff0000,
   BLUE: 0x0000ff,
+  PLATINUM: 0xd1d5db,
+  OBSIDIAN: 0x111827,
+  NEON: 0x22d3ee,
+  VOID: 0x7c3aed,
   JANUARI: 0xffffff,
   FEBRUARI: 0xffc0cb,
   MAART: 0xffd700,
@@ -253,6 +264,30 @@ const skinVisualOverrides = {
     emissiveIntensity: 0.42,
     specular: 0xd6e4ff,
     shininess: 90,
+  },
+  PLATINUM: {
+    emissive: 0x3d4653,
+    emissiveIntensity: 0.26,
+    specular: 0xffffff,
+    shininess: 140,
+  },
+  OBSIDIAN: {
+    emissive: 0x04070f,
+    emissiveIntensity: 0.48,
+    specular: 0x98a2b3,
+    shininess: 120,
+  },
+  NEON: {
+    emissive: 0x0f5f66,
+    emissiveIntensity: 0.55,
+    specular: 0xd9fbff,
+    shininess: 115,
+  },
+  VOID: {
+    emissive: 0x220f53,
+    emissiveIntensity: 0.62,
+    specular: 0xe3d3ff,
+    shininess: 135,
   },
   JANUARI: {
     emissive: 0x6f6f8a,
@@ -1716,6 +1751,18 @@ window.openShop = () => {
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
   const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(2);
   const radKost = window.getRadKost();
+  const skinShopHtml = DIAMANT_SKINS_SHOP.map((skin) => {
+    const gekocht = ontgrendeldeSkins.includes(skin.id);
+    const kanKopen = diamanten >= skin.prijs;
+    const knopTekst = gekocht ? "GEKOCHT" : `KOOP (${skin.prijs}D)`;
+    const knopKleur = gekocht ? "#16a34a" : kanKopen ? "#7c3aed" : "#555";
+    const cursor = gekocht || kanKopen ? "pointer" : "default";
+    return `<div style="padding:12px; background:#111827; border:2px solid #374151; border-radius:12px;">
+      <div style="font-size:22px; color:${skin.kleur};">${skin.naam}</div>
+      <div style="font-size:16px; color:#cbd5e1; margin:4px 0 10px 0;">Premium skin</div>
+      <button onclick="window.koopSkinMetDiamanten('${skin.id}')" ${gekocht ? "disabled" : ""} style="width:100%; padding:10px; background:${knopKleur}; color:white; border:2px solid white; border-radius:10px; font-family:Impact; font-size:18px; cursor:${cursor};">${knopTekst}</button>
+    </div>`;
+  }).join("");
   overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px;">
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
         <p style="font-size:24px; margin:8px 0; color:#2ecc71;">Geld: $${geld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
@@ -1731,12 +1778,44 @@ window.openShop = () => {
           <button onclick="window.draaiRad()" style="width:100%; padding:16px; background:${diamanten >= radKost ? "#8e44ad" : "#555"}; color:white; border:3px solid white; border-radius:12px; cursor:${diamanten >= radKost ? "pointer" : "default"}; font-family:Impact; font-size:24px;">DRAAI RAD (${radKost}D)</button>
           <p style="font-size:18px; color:#d7bde2; margin:10px 0 0 0;">Mogelijke rewards: Geld, Diamanten, Radius/Speed/Value upgrade</p>
         </div>
+        <div style="margin-top:22px; padding:16px; background:#1f1236; border:3px solid #7c3aed; border-radius:14px;">
+          <div style="font-size:26px; color:#c4b5fd; margin-bottom:10px;"> DIAMANT SKINS</div>
+          <p style="font-size:18px; margin:0 0 12px 0; color:#ddd6fe;">Dure skins die je alleen met edelstenen kunt kopen.</p>
+          <div style="display:grid; grid-template-columns:repeat(2, minmax(200px, 1fr)); gap:10px;">
+            ${skinShopHtml}
+          </div>
+        </div>
         <button onclick="window.sluit()" style="margin-top:16px; padding:14px 50px; background:#5dade2; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
     </div>`;
 };
 
 window.koopDiamant = () => {
   alert("Diamanten kopen staat uit. Verdien diamanten via Grass Pass.");
+};
+
+window.koopSkinMetDiamanten = (skinId) => {
+  const id = String(skinId || "").toUpperCase();
+  const skinDef = DIAMANT_SKINS_SHOP.find((skin) => skin.id === id);
+  if (!skinDef) {
+    alert("Deze skin bestaat niet.");
+    return;
+  }
+  if (ontgrendeldeSkins.includes(id)) {
+    alert(`${skinDef.naam} is al gekocht.`);
+    return;
+  }
+  if (diamanten < skinDef.prijs) {
+    alert(`Je hebt ${skinDef.prijs} diamanten nodig voor ${skinDef.naam}.`);
+    return;
+  }
+  diamanten -= skinDef.prijs;
+  ontgrendeldeSkins.push(id);
+  huidigeSkin = id;
+  window.applySkinVisual(huidigeSkin);
+  window.updateUI();
+  window.save(true);
+  alert(`${skinDef.naam} gekocht en geactiveerd!`);
+  window.openShop();
 };
 
 window.koopRebirt = () => {
@@ -1955,7 +2034,7 @@ window.openSkins = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
-  ["STARTER", "RED", "BLUE", ...maanden].forEach((s) => {
+  ["STARTER", "RED", "BLUE", ...DIAMANT_SKIN_IDS, ...maanden].forEach((s) => {
     const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
     h += `<button class="skinSelectBtn" data-skin="${s}" data-unlocked="${ok ? "1" : "0"}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;" ${ok ? "" : "disabled"}>${ok ? s : "LOCKED"}</button>`;
