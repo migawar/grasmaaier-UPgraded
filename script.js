@@ -118,6 +118,7 @@ let miniGameRonde = 1;
 let miniGameKnopZichtbaarTot = 0;
 let basicStateVoorCreative = null;
 let gebruikteRedeemCodes = [];
+let directSaveTimeoutId = null;
 const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 const LOCAL_SAVE_KEY = "grassMasterSaveV2";
 const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
@@ -153,7 +154,6 @@ const MULTIPLAYER_SERVERS = [
   { id: "EU-1", naam: "EUROPE #1", regio: "Europa", accent: "#60a5fa" },
   { id: "US-1", naam: "AMERICA #1", regio: "Verenigde Staten", accent: "#f59e0b" },
   { id: "ASIA-1", naam: "ASIA #1", regio: "Azie", accent: "#34d399" },
-  { id: "HELL", naam: "HELL SERVER", regio: "Underworld", accent: "#ef4444" },
 ];
 const DIAMANT_SKINS_SHOP = [
   { id: "PLATINUM", naam: "PLATINUM", prijs: 120, kleur: "#d1d5db" },
@@ -239,16 +239,6 @@ const MAP_PRESETS = [
       { x: 22, z: 15, r: 4.1, h: 7.7 },
       { x: -20, z: 20, r: 3.6, h: 8.8 },
     ],
-  },
-  {
-    id: "HELL",
-    naam: "HELL",
-    sky: 0x2b0000,
-    ground: 0x1a0505,
-    grass: 0x4a0a0a,
-    fog: { color: 0x3d0000, near: 20, far: 140 },
-    obstacleColor: 0x5c1818,
-    obstacles: [],
   },
 ];
 const PVP_MODES = [
@@ -551,6 +541,7 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.1,
     trailColor: 0x7dd3fc,
     trailStep: 0.26,
+    particleMode: "none",
   },
   GOLDEN: {
     auraColor: 0xfacc15,
@@ -564,6 +555,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 1.5,
     trailColor: 0xfef08a,
     trailStep: 0.24,
+    particleMode: "gold",
+    particleColor: 0xfde68a,
+    particleSize: 0.085,
+    particleOpacity: 0.68,
   },
   CYBER: {
     auraColor: 0x00e5ff,
@@ -577,6 +572,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 3.1,
     trailColor: 0x67e8f9,
     trailStep: 0.2,
+    particleMode: "cyber",
+    particleColor: 0x67e8f9,
+    particleSize: 0.08,
+    particleOpacity: 0.72,
   },
   EMBER: {
     auraColor: 0xfb7185,
@@ -590,6 +589,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.7,
     trailColor: 0xfb923c,
     trailStep: 0.22,
+    particleMode: "ember",
+    particleColor: 0xfb923c,
+    particleSize: 0.09,
+    particleOpacity: 0.75,
   },
   FROST: {
     auraColor: 0xbfdbfe,
@@ -603,6 +606,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 1.6,
     trailColor: 0xe0f2fe,
     trailStep: 0.25,
+    particleMode: "frost",
+    particleColor: 0xe0f2fe,
+    particleSize: 0.11,
+    particleOpacity: 0.52,
   },
   NEON: {
     auraColor: 0x22d3ee,
@@ -616,6 +623,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.8,
     trailColor: 0x22d3ee,
     trailStep: 0.2,
+    particleMode: "neon",
+    particleColor: 0x22d3ee,
+    particleSize: 0.085,
+    particleOpacity: 0.72,
   },
   VOID: {
     auraColor: 0x7c3aed,
@@ -629,9 +640,15 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.2,
     trailColor: 0xc4b5fd,
     trailStep: 0.23,
+    particleMode: "void",
+    particleColor: 0xa78bfa,
+    particleSize: 0.095,
+    particleOpacity: 0.66,
   },
 };
 const MOWER_SKIN_TRAIL_MAX_POINTS = 42;
+const MOWER_SKIN_PARTICLE_COUNT = 24;
+const DIRECT_SAVE_DEBOUNCE_MS = 140;
 
 const keys = {};
 let mowerBodyMaterial = null;
@@ -644,6 +661,10 @@ let mowerSkinAuraLight = null;
 let mowerSkinRing = null;
 let mowerSkinRingMaterial = null;
 let mowerSkinTrailLine = null;
+let mowerSkinParticles = null;
+let mowerSkinParticleMaterial = null;
+let mowerSkinParticlePositions = null;
+const mowerSkinParticleState = [];
 let skinFxPulse = 0;
 const mowerSkinTrailPoints = [];
 const mowerSkinTrailLastPos = new THREE.Vector3();
@@ -712,15 +733,11 @@ const createCustomServerDescriptor = (serverId) => {
     isCustom: true,
   };
 };
-const CUSTOM_SERVER_LIFETIME_MS = 24 * 60 * 60 * 1000;
 const sanitizeCustomServers = (value) => {
   if (!Array.isArray(value)) return [];
   const result = [];
   const seen = new Set();
-  const now = Date.now();
   for (const item of value) {
-    const createdAt = Number(item?.createdAt) || 0;
-    if (createdAt > 0 && now - createdAt > CUSTOM_SERVER_LIFETIME_MS) continue;
     const id = String(item?.id || "").trim().toUpperCase();
     if (!CUSTOM_SERVER_REGEX.test(id) || seen.has(id)) continue;
     const naam =
@@ -736,7 +753,6 @@ const sanitizeCustomServers = (value) => {
         ? item.accent.trim()
         : "#ec4899";
     result.push({ id, naam, regio, accent, isCustom: true });
-    result.push({ id, naam, regio, accent, isCustom: true, createdAt: createdAt || now });
     seen.add(id);
   }
   return result;
@@ -774,7 +790,6 @@ const registerCustomServer = (serverId, opties = {}) => {
       ? { accent: opties.accent.trim() }
       : {}),
     isCustom: true,
-    createdAt: Number(opties.createdAt) || Date.now(),
   };
   customServers.push(server);
   if (opties.persist !== false) saveCustomServersLocal();
@@ -961,11 +976,50 @@ const subscribePresence = () => {
     clearRemotePlayers();
     return;
   }
+  const subscribeViaSaves = () => {
+    const actieveServerId = normalizeServerId(multiplayerServerId);
+    const presenceQuery = query(
+      collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
+      where("multiplayerServerId", "==", actieveServerId),
+      limit(250),
+    );
+    presenceUnsubscribe = onSnapshot(
+      presenceQuery,
+      (snapshot) => {
+        const selfUid = String(ingelogdeGebruiker?.uid || "");
+        const gevonden = new Set();
+        snapshot.forEach((docSnap) => {
+          const uid = String(docSnap.id);
+          if (!uid || uid === selfUid) return;
+          const data = docSnap.data() || {};
+          if (!data.presenceUpdatedAt || typeof data.presenceUpdatedAt.toDate !== "function")
+            return;
+          if (Date.now() - data.presenceUpdatedAt.toDate().getTime() > PRESENCE_STALE_MS)
+            return;
+          gevonden.add(uid);
+          upsertRemotePlayer(uid, {
+            x: data.presenceX,
+            z: data.presenceZ,
+            rotationY: data.presenceRotationY,
+            skin: data.presenceSkin,
+          });
+        });
+        for (const [uid, remote] of remotePlayers) {
+          if (gevonden.has(uid)) continue;
+          disposeRemotePlayer(remote);
+          remotePlayers.delete(uid);
+        }
+      },
+      (err) => {
+        console.error("Presence save-stream fout:", err);
+        clearRemotePlayers();
+      },
+    );
+  };
   const actieveServerId = normalizeServerId(multiplayerServerId);
   const presenceQuery = query(
-    collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
-    where("multiplayerServerId", "==", actieveServerId),
-    limit(250),
+    collection(firebaseDb, FIREBASE_PRESENCE_COLLECTION),
+    limit(300),
   );
   presenceUnsubscribe = onSnapshot(
     presenceQuery,
@@ -976,16 +1030,17 @@ const subscribePresence = () => {
         const uid = String(docSnap.id);
         if (!uid || uid === selfUid) return;
         const data = docSnap.data() || {};
-        if (!data.presenceUpdatedAt || typeof data.presenceUpdatedAt.toDate !== "function")
+        if (normalizeServerId(data.serverId) !== actieveServerId) return;
+        if (!data.updatedAt || typeof data.updatedAt.toDate !== "function")
           return;
-        if (Date.now() - data.presenceUpdatedAt.toDate().getTime() > PRESENCE_STALE_MS)
+        if (Date.now() - data.updatedAt.toDate().getTime() > PRESENCE_STALE_MS)
           return;
         gevonden.add(uid);
         upsertRemotePlayer(uid, {
-          x: data.presenceX,
-          z: data.presenceZ,
-          rotationY: data.presenceRotationY,
-          skin: data.presenceSkin,
+          x: data.x,
+          z: data.z,
+          rotationY: data.rotationY,
+          skin: data.skin,
         });
       });
       for (const [uid, remote] of remotePlayers) {
@@ -995,8 +1050,8 @@ const subscribePresence = () => {
       }
     },
     (err) => {
-      console.error("Presence stream fout:", err);
-      clearRemotePlayers();
+      console.error("Presence stream fout, fallback naar saves:", err);
+      subscribeViaSaves();
     },
   );
 };
@@ -1014,11 +1069,22 @@ const publishPresence = async () => {
     presenceUpdatedAt: serverTimestamp(),
   };
   try {
-    await setDoc(
-      getSaveDocRef(ingelogdeGebruiker.uid),
-      payload,
-      { merge: true },
-    );
+    await Promise.all([
+      setDoc(getSaveDocRef(ingelogdeGebruiker.uid), payload, { merge: true }),
+      setDoc(
+        getPresenceDocRef(ingelogdeGebruiker.uid),
+        {
+          uid: String(ingelogdeGebruiker.uid || ""),
+          serverId,
+          x: mower.position.x,
+          z: mower.position.z,
+          rotationY: mower.rotation.y,
+          skin: huidigeSkin,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      ),
+    ]);
     lastPresenceSnapshot = {
       initialized: true,
       x: payload.presenceX,
@@ -1488,6 +1554,14 @@ window.sluit = () => {
   overlay.style.pointerEvents = "none";
 };
 
+const scheduleDirectSave = () => {
+  if (directSaveTimeoutId) clearTimeout(directSaveTimeoutId);
+  directSaveTimeoutId = setTimeout(() => {
+    directSaveTimeoutId = null;
+    window.save();
+  }, DIRECT_SAVE_DEBOUNCE_MS);
+};
+
 window.updateUI = () => {
   window.syncEventMetMaand();
   const nu = Date.now();
@@ -1605,6 +1679,7 @@ window.updateUI = () => {
   document.getElementById("eventBtn").style.border = eventRewardKlaar
     ? "8px solid #2ecc71"
     : "5px solid white";
+  scheduleDirectSave();
 };
 
 // --- 5. OVERIGE FUNCTIES ---
@@ -1622,6 +1697,33 @@ window.setCreativeSpeed = (value) => {
   creativeSpeed = Number(value);
   const el = document.getElementById("creativeSpeedVal");
   if (el) el.innerText = creativeSpeed.toFixed(2);
+};
+
+const resetMowerSkinParticles = (fx) => {
+  if (!mowerSkinParticles || !mowerSkinParticlePositions) return;
+  mowerSkinParticleState.length = 0;
+  for (let i = 0; i < MOWER_SKIN_PARTICLE_COUNT; i++) {
+    const particle = {
+      angle: Math.random() * Math.PI * 2,
+      radius: 0.2 + Math.random() * 0.9,
+      height: 0.1 + Math.random() * 0.7,
+      life: 0.2 + Math.random() * 0.9,
+      speed: 0.6 + Math.random() * 1.5,
+    };
+    mowerSkinParticleState.push(particle);
+    const i3 = i * 3;
+    mowerSkinParticlePositions[i3] = mower.position.x;
+    mowerSkinParticlePositions[i3 + 1] = mower.position.y + 0.2;
+    mowerSkinParticlePositions[i3 + 2] = mower.position.z;
+  }
+  if (mowerSkinParticles.geometry?.attributes?.position) {
+    mowerSkinParticles.geometry.attributes.position.needsUpdate = true;
+  }
+  if (mowerSkinParticleMaterial && fx) {
+    mowerSkinParticleMaterial.color.set(fx.particleColor || fx.trailColor);
+    mowerSkinParticleMaterial.opacity = fx.particleOpacity ?? 0.65;
+    mowerSkinParticleMaterial.size = fx.particleSize ?? 0.09;
+  }
 };
 
 window.applySkinVisual = (skinNaam) => {
@@ -1683,6 +1785,11 @@ window.applySkinVisual = (skinNaam) => {
     mowerSkinTrailPoints.length = 0;
     mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
     mowerSkinTrailInitialized = false;
+  }
+  if (mowerSkinParticles) {
+    const hasParticles = Boolean(fx && fx.particleMode && fx.particleMode !== "none");
+    mowerSkinParticles.visible = hasParticles;
+    if (hasParticles) resetMowerSkinParticles(fx);
   }
   skinFxPulse = 0;
 };
@@ -2051,10 +2158,6 @@ window.selectMultiplayerServer = async (serverId) => {
     registerCustomServer(multiplayerServerId);
   }
   lastPresenceSnapshot.initialized = false;
-  if (multiplayerServerId === "HELL") {
-    huidigeMapId = "HELL";
-    window.applyMapTheme();
-  }
   await window.save(true);
   subscribeChat();
   refreshOnlineSpelers();
@@ -2231,17 +2334,26 @@ const tryMarkPvpEnded = async () => {
   if (String(ingelogdeGebruiker.uid || "") !== String(pvpState.hostUid || "")) return;
   pvpState.endSent = true;
   try {
-    await setDoc(
-      getSaveDocRef(ingelogdeGebruiker.uid),
-      {
-        pvpLobbyStatus: "ended",
-        pvpLobbyGameId: pvpState.gameId,
-        pvpLobbyServerId: pvpState.serverId,
-        pvpLobbyUpdatedAtMs: Date.now(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    const payload = {
+      pvpLobbyStatus: "ended",
+      pvpLobbyGameId: pvpState.gameId,
+      pvpLobbyServerId: pvpState.serverId,
+      pvpLobbyUpdatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    };
+    await Promise.all([
+      setDoc(getSaveDocRef(ingelogdeGebruiker.uid), payload, { merge: true }),
+      setDoc(
+        getPvpLobbyDocRef(pvpState.serverId),
+        {
+          serverId: normalizeServerId(pvpState.serverId),
+          gameId: pvpState.gameId,
+          status: "ended",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      ),
+    ]);
   } catch (err) {
     console.error("PVP einde sync mislukt:", err);
   }
@@ -2370,32 +2482,79 @@ const subscribePvpLobby = () => {
     stopPvpSync();
     return;
   }
-  const lobbyQuery = query(
-    collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
-    where("multiplayerServerId", "==", normalizeServerId(multiplayerServerId)),
-    limit(500),
-  );
-  pvpLobbyUnsubscribe = onSnapshot(
-    lobbyQuery,
-    (snapshot) => {
-      let besteLobby = null;
-      snapshot.forEach((docSnap) => {
+  const serverId = normalizeServerId(multiplayerServerId);
+  let actief = true;
+  const unsubDoc = onSnapshot(
+    getPvpLobbyDocRef(serverId),
+    (docSnap) => {
+      if (!actief) return;
+      if (docSnap.exists()) {
         const data = docSnap.data() || {};
-        const lobby = getPvpLobbyPayloadFromSave(data);
-        if (!lobby.gameId || lobby.status !== "running") return;
-        if (lobby.serverId !== normalizeServerId(multiplayerServerId)) return;
-        if (!besteLobby || lobby.updatedAtMs > besteLobby.updatedAtMs) {
-          besteLobby = lobby;
-        }
-      });
-      applyPvpLobbyData(besteLobby);
+        applyPvpLobbyData({
+          serverId: normalizeServerId(data.serverId || serverId),
+          gameId: String(data.gameId || ""),
+          mode: String(data.mode || "MOST_GRASS"),
+          status: String(data.status || "idle"),
+          hostUid: String(data.hostUid || ""),
+          allowedUids: Array.isArray(data.allowedUids)
+            ? data.allowedUids.map((uid) => String(uid || ""))
+            : [],
+          endsAtMs: Number(data.endsAtMs) || 0,
+        });
+        return;
+      }
+      const lobbyQuery = query(
+        collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
+        where("multiplayerServerId", "==", serverId),
+        limit(500),
+      );
+      const fallbackUnsub = onSnapshot(
+        lobbyQuery,
+        (snapshot) => {
+          if (!actief) return;
+          let besteLobby = null;
+          snapshot.forEach((s) => {
+            const lobby = getPvpLobbyPayloadFromSave(s.data() || {});
+            if (!lobby.gameId || lobby.status !== "running") return;
+            if (lobby.serverId !== serverId) return;
+            if (!besteLobby || lobby.updatedAtMs > besteLobby.updatedAtMs) {
+              besteLobby = lobby;
+            }
+          });
+          applyPvpLobbyData(besteLobby);
+        },
+        (err) => console.error("PVP lobby save-fallback fout:", err),
+      );
+      const prevUnsub = pvpLobbyUnsubscribe;
+      pvpLobbyUnsubscribe = () => {
+        actief = false;
+        fallbackUnsub();
+        if (typeof prevUnsub === "function") prevUnsub();
+      };
     },
     (err) => console.error("PVP lobby stream fout:", err),
   );
+  pvpLobbyUnsubscribe = () => {
+    actief = false;
+    unsubDoc();
+  };
 };
 const markDuelInvite = async (inviteId, status) => {
-  // Bij rules met write-only eigen save kunnen we invites van anderen niet aanpassen.
-  // Daarom lokaal dedupliceren en geen externe invite status schrijven.
+  if (!firebaseDb || !inviteId) return null;
+  try {
+    await setDoc(
+      getDuelInviteDocRef(inviteId),
+      {
+        status: String(status || "handled"),
+        handledAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (err) {
+    if (err?.code !== "permission-denied") {
+      console.error("Duel invite status update mislukt:", err);
+    }
+  }
   return status ? inviteId : null;
 };
 const startDuelFromInvite = async (invite) => {
@@ -2406,23 +2565,39 @@ const startDuelFromInvite = async (invite) => {
   const gameId = `${Date.now()}_DUEL_${selfUid.slice(0, 6)}`;
   const endAtMs = Date.now() + PVP_DURATION_MS;
   try {
-    await setDoc(
-      getSaveDocRef(ingelogdeGebruiker.uid),
-      {
-        pvpLobbyServerId: normalizeServerId(multiplayerServerId),
-        pvpLobbyGameId: gameId,
-        pvpLobbyMode: "DUEL_GRASS",
-        pvpLobbyStatus: "running",
-        pvpLobbyHostUid: selfUid,
-        pvpLobbyAllowedUids: [selfUid, fromUid],
-        pvpLobbyEndsAtMs: endAtMs,
-        pvpLobbySpeed: PVP_FORCE_SPEED,
-        pvpLobbyRadius: PVP_FORCE_RADIUS,
-        pvpLobbyUpdatedAtMs: Date.now(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    const serverId = normalizeServerId(multiplayerServerId);
+    const payload = {
+      pvpLobbyServerId: serverId,
+      pvpLobbyGameId: gameId,
+      pvpLobbyMode: "DUEL_GRASS",
+      pvpLobbyStatus: "running",
+      pvpLobbyHostUid: selfUid,
+      pvpLobbyAllowedUids: [selfUid, fromUid],
+      pvpLobbyEndsAtMs: endAtMs,
+      pvpLobbySpeed: PVP_FORCE_SPEED,
+      pvpLobbyRadius: PVP_FORCE_RADIUS,
+      pvpLobbyUpdatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    };
+    await Promise.all([
+      setDoc(getSaveDocRef(ingelogdeGebruiker.uid), payload, { merge: true }),
+      setDoc(
+        getPvpLobbyDocRef(serverId),
+        {
+          serverId,
+          gameId,
+          mode: "DUEL_GRASS",
+          status: "running",
+          hostUid: selfUid,
+          allowedUids: [selfUid, fromUid],
+          endsAtMs: endAtMs,
+          speed: PVP_FORCE_SPEED,
+          radius: PVP_FORCE_RADIUS,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      ),
+    ]);
   } catch (err) {
     console.error("Duel start mislukt:", err);
     alert("Kon duel niet starten.");
@@ -2431,32 +2606,21 @@ const startDuelFromInvite = async (invite) => {
 const subscribeDuelInvites = () => {
   stopDuelInviteSubscription();
   if (!firebaseDb || !ingelogdeGebruiker) return;
+  const selfUid = String(ingelogdeGebruiker.uid || "");
+  const actieveServer = normalizeServerId(multiplayerServerId);
   const inviteQuery = query(
-    collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
-    where("multiplayerServerId", "==", normalizeServerId(multiplayerServerId)),
-    limit(500),
+    collection(firebaseDb, FIREBASE_DUEL_INVITES_COLLECTION),
+    where("toUid", "==", selfUid),
+    limit(30),
   );
   duelInviteUnsubscribe = onSnapshot(
     inviteQuery,
     async (snapshot) => {
-      const selfUid = String(ingelogdeGebruiker.uid || "");
       const pending = snapshot.docs
-        .map((docSnap) => {
-          const data = docSnap.data() || {};
-          return {
-            id: String(data.duelInviteId || ""),
-            fromUid: String(data.duelInviteFromUid || docSnap.id),
-            fromName: String(data.duelInviteFromName || getLeaderboardDisplayName(data, docSnap.id)),
-            toUid: String(data.duelInviteToUid || ""),
-            serverId: normalizeServerId(data.duelInviteServerId),
-            status: String(data.duelInviteStatus || "none"),
-            createdAtMs: Number(data.duelInviteCreatedAtMs) || 0,
-          };
-        })
+        .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
         .filter((invite) => invite.id && invite.status === "pending")
-        .filter((invite) => invite.toUid === selfUid)
-        .filter((invite) => invite.serverId === normalizeServerId(multiplayerServerId))
-        .filter((invite) => Date.now() - invite.createdAtMs <= DUEL_INVITE_MAX_AGE_MS)
+        .filter((invite) => normalizeServerId(invite.serverId) === actieveServer)
+        .filter((invite) => Date.now() - Number(invite.createdAtMs || 0) <= DUEL_INVITE_MAX_AGE_MS)
         .sort((a, b) => b.createdAtMs - a.createdAtMs);
       const invite = pending[0];
       if (!invite || invite.id === laatsteDuelInviteId) return;
@@ -2470,7 +2634,48 @@ const subscribeDuelInvites = () => {
       await markDuelInvite(invite.id, "accepted");
       await startDuelFromInvite(invite);
     },
-    (err) => console.error("Duel invite stream fout:", err),
+    (err) => {
+      console.error("Duel invite stream fout, fallback naar saves:", err);
+      const saveInviteQuery = query(
+        collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
+        where("multiplayerServerId", "==", actieveServer),
+        limit(500),
+      );
+      const fallbackUnsub = onSnapshot(
+        saveInviteQuery,
+        async (snapshot) => {
+          const pending = snapshot.docs
+            .map((docSnap) => {
+              const data = docSnap.data() || {};
+              return {
+                id: String(data.duelInviteId || ""),
+                fromUid: String(data.duelInviteFromUid || docSnap.id),
+                fromName: String(
+                  data.duelInviteFromName || getLeaderboardDisplayName(data, docSnap.id),
+                ),
+                toUid: String(data.duelInviteToUid || ""),
+                serverId: normalizeServerId(data.duelInviteServerId),
+                status: String(data.duelInviteStatus || "none"),
+                createdAtMs: Number(data.duelInviteCreatedAtMs) || 0,
+              };
+            })
+            .filter((invite) => invite.id && invite.status === "pending")
+            .filter((invite) => invite.toUid === selfUid)
+            .filter((invite) => invite.serverId === actieveServer)
+            .filter((invite) => Date.now() - invite.createdAtMs <= DUEL_INVITE_MAX_AGE_MS)
+            .sort((a, b) => b.createdAtMs - a.createdAtMs);
+          const invite = pending[0];
+          if (!invite || invite.id === laatsteDuelInviteId) return;
+          laatsteDuelInviteId = invite.id;
+          const fromName = String(invite.fromName || "SPELER");
+          const wil = confirm(`${fromName} nodigt je uit voor een duel (1v1). Accepteren?`);
+          if (!wil) return;
+          await startDuelFromInvite(invite);
+        },
+        (fallbackErr) => console.error("Duel invite save-fallback fout:", fallbackErr),
+      );
+      duelInviteUnsubscribe = fallbackUnsub;
+    },
   );
 };
 window.inviteDuel = async (targetUid, targetName = "SPELER") => {
@@ -2483,21 +2688,40 @@ window.inviteDuel = async (targetUid, targetName = "SPELER") => {
   const fromUid = String(ingelogdeGebruiker.uid || "");
   if (!toUid || toUid === fromUid) return;
   try {
-    await setDoc(
-      getSaveDocRef(ingelogdeGebruiker.uid),
-      {
-        duelInviteId: `${Date.now()}_${fromUid.slice(0, 8)}_${toUid.slice(0, 8)}`,
-        duelInviteFromUid: fromUid,
-        duelInviteFromName: getChatDisplayName(),
-        duelInviteToUid: toUid,
-        duelInviteToName: naam.slice(0, 24),
-        duelInviteServerId: normalizeServerId(multiplayerServerId),
-        duelInviteStatus: "pending",
-        duelInviteCreatedAtMs: Date.now(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    const inviteId = `${Date.now()}_${fromUid.slice(0, 8)}_${toUid.slice(0, 8)}`;
+    const serverId = normalizeServerId(multiplayerServerId);
+    await Promise.all([
+      setDoc(
+        getSaveDocRef(ingelogdeGebruiker.uid),
+        {
+          duelInviteId: inviteId,
+          duelInviteFromUid: fromUid,
+          duelInviteFromName: getChatDisplayName(),
+          duelInviteToUid: toUid,
+          duelInviteToName: naam.slice(0, 24),
+          duelInviteServerId: serverId,
+          duelInviteStatus: "pending",
+          duelInviteCreatedAtMs: Date.now(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      ),
+      setDoc(
+        getDuelInviteDocRef(inviteId),
+        {
+          id: inviteId,
+          fromUid,
+          fromName: getChatDisplayName(),
+          toUid,
+          toName: naam.slice(0, 24),
+          serverId,
+          status: "pending",
+          createdAt: serverTimestamp(),
+          createdAtMs: Date.now(),
+        },
+        { merge: true },
+      ),
+    ]);
     alert(`Duel-uitnodiging verstuurd naar ${naam}.`);
   } catch (err) {
     console.error("Duel invite versturen mislukt:", err);
@@ -2581,23 +2805,40 @@ window.startPvpMiniGame = async (modeId) => {
   const gameId = `${Date.now()}_${String(ingelogdeGebruiker.uid || "").slice(0, 8)}`;
   const endAtMs = Date.now() + PVP_DURATION_MS;
   try {
-    await setDoc(
-      getSaveDocRef(ingelogdeGebruiker.uid),
-      {
-        pvpLobbyServerId: normalizeServerId(multiplayerServerId),
-        pvpLobbyGameId: gameId,
-        pvpLobbyMode: mode.id,
-        pvpLobbyStatus: "running",
-        pvpLobbyHostUid: String(ingelogdeGebruiker.uid || ""),
-        pvpLobbyAllowedUids: [],
-        pvpLobbyEndsAtMs: endAtMs,
-        pvpLobbySpeed: PVP_FORCE_SPEED,
-        pvpLobbyRadius: PVP_FORCE_RADIUS,
-        pvpLobbyUpdatedAtMs: Date.now(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    const serverId = normalizeServerId(multiplayerServerId);
+    const hostUid = String(ingelogdeGebruiker.uid || "");
+    const payload = {
+      pvpLobbyServerId: serverId,
+      pvpLobbyGameId: gameId,
+      pvpLobbyMode: mode.id,
+      pvpLobbyStatus: "running",
+      pvpLobbyHostUid: hostUid,
+      pvpLobbyAllowedUids: [],
+      pvpLobbyEndsAtMs: endAtMs,
+      pvpLobbySpeed: PVP_FORCE_SPEED,
+      pvpLobbyRadius: PVP_FORCE_RADIUS,
+      pvpLobbyUpdatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    };
+    await Promise.all([
+      setDoc(getSaveDocRef(ingelogdeGebruiker.uid), payload, { merge: true }),
+      setDoc(
+        getPvpLobbyDocRef(serverId),
+        {
+          serverId,
+          gameId,
+          mode: mode.id,
+          status: "running",
+          hostUid,
+          allowedUids: [],
+          endsAtMs: endAtMs,
+          speed: PVP_FORCE_SPEED,
+          radius: PVP_FORCE_RADIUS,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      ),
+    ]);
   } catch (err) {
     console.error("PVP start mislukt:", err);
     alert("Kon PvP minigame niet starten.");
@@ -3440,12 +3681,20 @@ window.toggleGoogleLogin = async () => {
 };
 
 window.save = async (silent = false) => {
-  const moetLokaalOpslaan = autoSaveOnd || silent;
-  const moetCloudOpslaan = Boolean(ingelogdeGebruiker && firebaseDb);
+  // Lokale autosave altijd aan als veiligheidsnet.
+  const moetLokaalOpslaan = true;
+  // Cloud save enkel bij expliciete save of wanneer autosave toggle aan staat.
+  const moetCloudOpslaan = Boolean(
+    ingelogdeGebruiker && firebaseDb && (autoSaveOnd || silent),
+  );
   if (!moetLokaalOpslaan && !moetCloudOpslaan) return;
 
   const data = window.getSaveData();
-  localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
+  try {
+    localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
+  } catch (err) {
+    console.error("Lokale save mislukt:", err);
+  }
 
   if (moetCloudOpslaan) {
     try {
@@ -3835,6 +4084,26 @@ mowerSkinTrailLine.frustumCulled = false;
 mowerSkinTrailLine.renderOrder = 2;
 scene.add(mowerSkinTrailLine);
 
+const mowerSkinParticleGeometry = new THREE.BufferGeometry();
+mowerSkinParticlePositions = new Float32Array(MOWER_SKIN_PARTICLE_COUNT * 3);
+mowerSkinParticleGeometry.setAttribute(
+  "position",
+  new THREE.BufferAttribute(mowerSkinParticlePositions, 3),
+);
+mowerSkinParticleMaterial = new THREE.PointsMaterial({
+  color: 0xffffff,
+  size: 0.09,
+  transparent: true,
+  opacity: 0.65,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+});
+mowerSkinParticles = new THREE.Points(mowerSkinParticleGeometry, mowerSkinParticleMaterial);
+mowerSkinParticles.frustumCulled = false;
+mowerSkinParticles.renderOrder = 3;
+mowerSkinParticles.visible = false;
+scene.add(mowerSkinParticles);
+
 mower.position.set(0, 0, 0);
 scene.add(mower, new THREE.AmbientLight(0x404040));
 const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -3842,7 +4111,6 @@ light.position.set(20, 50, 20);
 scene.add(light);
 camera.position.set(0, 5, 7);
 const MAP_HALF_SIZE = 70;
-let currentMapHalfSize = MAP_HALF_SIZE;
 const MAP_SIZE = MAP_HALF_SIZE * 2;
 const MAP_BOUNDARY_MARGIN = 0.8;
 const GRASS_DENSITY = isLowEndDevice ? 4.25 : 5;
@@ -3918,8 +4186,6 @@ mapObstacleGroup = new THREE.Group();
 scene.add(mapObstacleGroup);
 mapDecorGroup = new THREE.Group();
 scene.add(mapDecorGroup);
-const hellCarGroup = new THREE.Group();
-scene.add(hellCarGroup);
 
 const grassDummy = new THREE.Object3D();
 const grassData = new Array(totalGrass);
@@ -3971,7 +4237,6 @@ const disposeObject3D = (root) => {
     child.material?.dispose?.();
   });
 };
-
 const clearMapObstacles = () => {
   while (mapObstacles.length) {
     const obstacle = mapObstacles.pop();
@@ -4180,106 +4445,6 @@ const rebuildMapObstacles = () => {
     });
   }
 };
-
-const hellCars = [];
-const HELLCAR_WANDER_SPEED = 0.35;
-const HELLCAR_CHASE_SPEED = 0.5;
-const HELLCAR_DETECTION_RADIUS_SQ = 35 * 35;
-const HELLCAR_TURN_LERP_BASE = 0.04;
-const createHellCarMesh = () => {
-  const group = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(1.5, 0.8, 2.5),
-    new THREE.MeshPhongMaterial({ color: 0x880000, emissive: 0x330000 })
-  );
-  body.position.y = 0.6;
-  group.add(body);
-  const spikes = new THREE.Mesh(
-    new THREE.ConeGeometry(0.2, 0.8, 8),
-    new THREE.MeshPhongMaterial({ color: 0xffffff })
-  );
-  spikes.rotation.x = Math.PI / 2;
-  spikes.position.set(0, 0.6, 1.4);
-  group.add(spikes);
-  return group;
-};
-
-const initHellCars = () => {
-  while (hellCars.length) hellCars.pop();
-  hellCarGroup.clear();
-  if (huidigeMapId !== "HELL") return;
-  for (let i = 0; i < 25; i++) {
-    const mesh = createHellCarMesh();
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 30 + Math.random() * 150;
-    mesh.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
-    hellCarGroup.add(mesh);
-    hellCars.push({
-      mesh,
-      velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize().multiplyScalar(0.35),
-      velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize().multiplyScalar(HELLCAR_WANDER_SPEED),
-    });
-  }
-};
-
-const updateHellCars = (deltaFactor) => {
-  if (huidigeMapId !== "HELL") return;
-  const bounds = currentMapHalfSize - 2;
-  const lerpAlpha = Math.min(1, HELLCAR_TURN_LERP_BASE * deltaFactor * 60);
-
-  for (const car of hellCars) {
-    const dxToPlayer = mower.position.x - car.mesh.position.x;
-    const dzToPlayer = mower.position.z - car.mesh.position.z;
-    const distToPlayerSq = dxToPlayer * dxToPlayer + dzToPlayer * dzToPlayer;
-
-    // Smart behavior: chase or wander
-    if (distToPlayerSq < HELLCAR_DETECTION_RADIUS_SQ && distToPlayerSq > 1) {
-      // Chase mode: move towards player
-      const targetVelocity = new THREE.Vector3(dxToPlayer, 0, dzToPlayer)
-        .normalize()
-        .multiplyScalar(HELLCAR_CHASE_SPEED);
-      car.velocity.lerp(targetVelocity, lerpAlpha);
-    } else {
-      // Wander mode: slow down if it was chasing
-      if (car.velocity.lengthSq() > (HELLCAR_WANDER_SPEED * HELLCAR_WANDER_SPEED) * 1.01) {
-        const targetWanderVelocity = car.velocity.clone().normalize().multiplyScalar(HELLCAR_WANDER_SPEED);
-        car.velocity.lerp(targetWanderVelocity, lerpAlpha * 0.5);
-      }
-    }
-
-    // Apply movement
-    car.mesh.position.addScaledVector(car.velocity, deltaFactor * 60);
-    if (car.mesh.position.x > bounds || car.mesh.position.x < -bounds) car.velocity.x *= -1;
-    if (car.mesh.position.z > bounds || car.mesh.position.z < -bounds) car.velocity.z *= -1;
-
-    // Boundary collision
-    if (car.mesh.position.x > bounds || car.mesh.position.x < -bounds) {
-      car.velocity.x *= -1;
-      car.mesh.position.x = Math.max(-bounds, Math.min(bounds, car.mesh.position.x));
-    }
-    if (car.mesh.position.z > bounds || car.mesh.position.z < -bounds) {
-      car.velocity.z *= -1;
-      car.mesh.position.z = Math.max(-bounds, Math.min(bounds, car.mesh.position.z));
-    }
-
-    // Point in direction of movement
-    car.mesh.lookAt(car.mesh.position.clone().add(car.velocity));
-    const dx = car.mesh.position.x - mower.position.x;
-    const dz = car.mesh.position.z - mower.position.z;
-    if (dx * dx + dz * dz < 5) {
-
-    // Kill player check
-    if (distToPlayerSq < 5) {
-      alert("JE BENT DOOD! Pas op voor de Hell Cars.");
-      huidigeMapId = "CLASSIC";
-      mower.position.set(0, 0, 0);
-      window.applyMapTheme();
-      window.updateUI();
-      window.save(true);
-    }
-  }
-};
-
 const applyMapTheme = () => {
   const map = getMapById(huidigeMapId);
   const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
@@ -4297,14 +4462,6 @@ const applyMapTheme = () => {
   }
   rebuildMapObstacles();
   rebuildMapDecor();
-  if (huidigeMapId === "HELL") {
-    currentMapHalfSize = 400; // Groot, maar niet eindig (wel eindig, maar groot)
-    initHellCars();
-  } else {
-    currentMapHalfSize = MAP_HALF_SIZE;
-    hellCarGroup.clear();
-    hellCars.length = 0;
-  }
 };
 window.applyMapTheme = applyMapTheme;
 const solveObstacleCollision = (prevX, prevZ) => {
@@ -4510,28 +4667,78 @@ function updateMowerSkinFx(deltaSec, mowerIsMoving) {
       mowerSkinRingMaterial.opacity = fx.ringOpacity + pulse01 * 0.08;
     }
   }
-  if (!mowerSkinTrailLine || !mowerSkinTrailLine.visible || !mowerIsMoving) return;
-  const step = Math.max(0.16, Number(fx.trailStep) || 0.24);
-  const pos = new THREE.Vector3(mower.position.x, 0.06, mower.position.z);
-  if (!mowerSkinTrailInitialized) {
-    mowerSkinTrailPoints.push(pos);
-    mowerSkinTrailLastPos.copy(pos);
-    mowerSkinTrailInitialized = true;
-    mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+  if (mowerSkinTrailLine && mowerSkinTrailLine.visible && mowerIsMoving) {
+    const step = Math.max(0.16, Number(fx.trailStep) || 0.24);
+    const pos = new THREE.Vector3(mower.position.x, 0.06, mower.position.z);
+    if (!mowerSkinTrailInitialized) {
+      mowerSkinTrailPoints.push(pos);
+      mowerSkinTrailLastPos.copy(pos);
+      mowerSkinTrailInitialized = true;
+      mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+    } else {
+      const dx = pos.x - mowerSkinTrailLastPos.x;
+      const dz = pos.z - mowerSkinTrailLastPos.z;
+      if (dx * dx + dz * dz >= step * step) {
+        mowerSkinTrailPoints.push(pos);
+        mowerSkinTrailLastPos.copy(pos);
+        if (mowerSkinTrailPoints.length > MOWER_SKIN_TRAIL_MAX_POINTS) {
+          mowerSkinTrailPoints.splice(
+            0,
+            mowerSkinTrailPoints.length - MOWER_SKIN_TRAIL_MAX_POINTS,
+          );
+        }
+        mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+      }
+    }
+  }
+
+  if (
+    !mowerSkinParticles ||
+    !mowerSkinParticles.visible ||
+    !mowerSkinParticlePositions ||
+    !mowerSkinParticleState.length
+  )
     return;
+  const mode = fx.particleMode || "none";
+  for (let i = 0; i < mowerSkinParticleState.length; i++) {
+    const p = mowerSkinParticleState[i];
+    p.life -= deltaSec * (0.7 + p.speed * 0.18);
+    if (p.life <= 0) {
+      p.life = 0.6 + Math.random() * 0.9;
+      p.angle = Math.random() * Math.PI * 2;
+      p.radius = 0.2 + Math.random() * 0.95;
+      p.height = 0.08 + Math.random() * 0.75;
+      p.speed = 0.6 + Math.random() * 1.7;
+    }
+    p.angle += deltaSec * (0.8 + p.speed);
+    const swirl = p.radius * (0.65 + Math.sin(skinFxPulse + i * 0.4) * 0.35);
+    let px = mower.position.x + Math.cos(p.angle) * swirl;
+    let py = mower.position.y + p.height + Math.sin(skinFxPulse + i) * 0.07;
+    let pz = mower.position.z + Math.sin(p.angle) * swirl;
+    if (mode === "ember") {
+      py += 0.2 + (1 - p.life) * 0.9;
+      pz -= 0.55 + (mowerIsMoving ? 0.45 : 0.15);
+    } else if (mode === "frost") {
+      py = mower.position.y + 0.22 + Math.sin(p.angle * 1.3 + skinFxPulse) * 0.08;
+      p.radius = Math.max(0.15, p.radius - deltaSec * 0.05);
+      pz -= 0.2;
+    } else if (mode === "void") {
+      py = mower.position.y + 0.35 + Math.cos(p.angle * 1.4 + skinFxPulse) * 0.22;
+      px += Math.sin(skinFxPulse * 1.4 + i) * 0.14;
+      pz += Math.cos(skinFxPulse * 1.2 + i) * 0.14;
+    } else if (mode === "cyber" || mode === "neon") {
+      py += Math.sin((skinFxPulse + i) * 2.3) * 0.1;
+      pz -= 0.35 + (mowerIsMoving ? 0.35 : 0.08);
+    } else if (mode === "gold") {
+      py += 0.16 + Math.sin(skinFxPulse + i * 1.2) * 0.12;
+    }
+    const i3 = i * 3;
+    mowerSkinParticlePositions[i3] = px;
+    mowerSkinParticlePositions[i3 + 1] = py;
+    mowerSkinParticlePositions[i3 + 2] = pz;
   }
-  const dx = pos.x - mowerSkinTrailLastPos.x;
-  const dz = pos.z - mowerSkinTrailLastPos.z;
-  if (dx * dx + dz * dz < step * step) return;
-  mowerSkinTrailPoints.push(pos);
-  mowerSkinTrailLastPos.copy(pos);
-  if (mowerSkinTrailPoints.length > MOWER_SKIN_TRAIL_MAX_POINTS) {
-    mowerSkinTrailPoints.splice(
-      0,
-      mowerSkinTrailPoints.length - MOWER_SKIN_TRAIL_MAX_POINTS,
-    );
-  }
-  mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+  const posAttr = mowerSkinParticles.geometry?.attributes?.position;
+  if (posAttr) posAttr.needsUpdate = true;
 }
 
 function animate(nowPerf = performance.now()) {
@@ -4584,7 +4791,6 @@ function animate(nowPerf = performance.now()) {
   }
   if (gameMode === "classic" && !oneindigSpeelveldOnd) {
     const maxPos = MAP_HALF_SIZE - MAP_BOUNDARY_MARGIN;
-    const maxPos = currentMapHalfSize - MAP_BOUNDARY_MARGIN;
     mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
   }
@@ -4603,7 +4809,6 @@ function animate(nowPerf = performance.now()) {
     blueAuraPulse += deltaSec * 4.6;
     mowerBlueAuraLight.intensity = 1.05 + Math.sin(blueAuraPulse) * 0.2;
   }
-  updateHellCars(deltaSec);
   updateMowerSkinFx(deltaSec, mowerIsMoving);
   updateFpsMeter();
   updateGroundTiles();
