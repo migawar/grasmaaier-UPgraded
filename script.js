@@ -3203,14 +3203,103 @@ for (let x = 0; x < grassPerSide; x++) {
 }
 grassMesh.instanceMatrix.needsUpdate = true;
 
+const disposeObject3D = (root) => {
+  if (!root) return;
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.geometry?.dispose?.();
+    if (Array.isArray(child.material)) {
+      child.material.forEach((mat) => mat?.dispose?.());
+      return;
+    }
+    child.material?.dispose?.();
+  });
+};
 const clearMapObstacles = () => {
   while (mapObstacles.length) {
     const obstacle = mapObstacles.pop();
     if (!obstacle) continue;
     mapObstacleGroup?.remove(obstacle.mesh);
-    obstacle.mesh?.geometry?.dispose?.();
-    obstacle.mesh?.material?.dispose?.();
+    disposeObject3D(obstacle.mesh);
   }
+};
+const createMapObstacleMesh = (mapId, radius, height, color) => {
+  const group = new THREE.Group();
+  if (mapId === "NEON_CITY") {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(radius * 1.8, height, radius * 1.8),
+      new THREE.MeshLambertMaterial({ color }),
+    );
+    body.position.y = height * 0.5;
+    group.add(body);
+    const accent = new THREE.Mesh(
+      new THREE.BoxGeometry(radius * 1.95, height * 0.08, radius * 1.95),
+      new THREE.MeshBasicMaterial({ color: 0x22d3ee }),
+    );
+    accent.position.y = height * 0.72;
+    group.add(accent);
+    return group;
+  }
+  if (mapId === "VOLCANO") {
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(radius * 1.2, height, 14),
+      new THREE.MeshLambertMaterial({ color }),
+    );
+    cone.position.y = height * 0.5;
+    group.add(cone);
+    const lava = new THREE.Mesh(
+      new THREE.TorusGeometry(radius * 0.55, Math.max(0.08, radius * 0.12), 8, 18),
+      new THREE.MeshBasicMaterial({ color: 0xff5a36 }),
+    );
+    lava.rotation.x = Math.PI / 2;
+    lava.position.y = height * 0.86;
+    group.add(lava);
+    return group;
+  }
+  if (mapId === "DESERT") {
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 0.32, radius * 0.42, height, 10),
+      new THREE.MeshLambertMaterial({ color: 0x4e7f3d }),
+    );
+    trunk.position.y = height * 0.5;
+    group.add(trunk);
+    const arm = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 0.16, radius * 0.2, height * 0.45, 8),
+      new THREE.MeshLambertMaterial({ color: 0x4e7f3d }),
+    );
+    arm.rotation.z = Math.PI / 2.7;
+    arm.position.set(radius * 0.46, height * 0.56, 0);
+    group.add(arm);
+    return group;
+  }
+  if (mapId === "SNOW") {
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 0.18, radius * 0.22, height * 0.33, 10),
+      new THREE.MeshLambertMaterial({ color: 0x6b4f36 }),
+    );
+    trunk.position.y = height * 0.16;
+    group.add(trunk);
+    const pine = new THREE.Mesh(
+      new THREE.ConeGeometry(radius * 1.05, height * 0.85, 14),
+      new THREE.MeshLambertMaterial({ color: 0x90b6cf }),
+    );
+    pine.position.y = height * 0.58;
+    group.add(pine);
+    return group;
+  }
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius * 0.3, radius * 0.36, height * 0.62, 10),
+    new THREE.MeshLambertMaterial({ color: 0x6b4f36 }),
+  );
+  trunk.position.y = height * 0.31;
+  group.add(trunk);
+  const crown = new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 0.95, 12, 10),
+    new THREE.MeshLambertMaterial({ color }),
+  );
+  crown.position.y = height * 0.84;
+  group.add(crown);
+  return group;
 };
 const rebuildMapObstacles = () => {
   clearMapObstacles();
@@ -3219,11 +3308,8 @@ const rebuildMapObstacles = () => {
   for (const def of map.obstacles || []) {
     const radius = Math.max(0.8, Number(def.r) || 1.5);
     const height = Math.max(1.2, Number(def.h) || 3);
-    const mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(radius, radius * 1.08, height, 16),
-      new THREE.MeshLambertMaterial({ color: obstacleColor }),
-    );
-    mesh.position.set(Number(def.x) || 0, height * 0.5, Number(def.z) || 0);
+    const mesh = createMapObstacleMesh(map.id, radius, height, obstacleColor);
+    mesh.position.set(Number(def.x) || 0, 0, Number(def.z) || 0);
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     mapObstacleGroup.add(mesh);
