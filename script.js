@@ -540,6 +540,7 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.1,
     trailColor: 0x7dd3fc,
     trailStep: 0.26,
+    particleMode: "none",
   },
   GOLDEN: {
     auraColor: 0xfacc15,
@@ -553,6 +554,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 1.5,
     trailColor: 0xfef08a,
     trailStep: 0.24,
+    particleMode: "gold",
+    particleColor: 0xfde68a,
+    particleSize: 0.085,
+    particleOpacity: 0.68,
   },
   CYBER: {
     auraColor: 0x00e5ff,
@@ -566,6 +571,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 3.1,
     trailColor: 0x67e8f9,
     trailStep: 0.2,
+    particleMode: "cyber",
+    particleColor: 0x67e8f9,
+    particleSize: 0.08,
+    particleOpacity: 0.72,
   },
   EMBER: {
     auraColor: 0xfb7185,
@@ -579,6 +588,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.7,
     trailColor: 0xfb923c,
     trailStep: 0.22,
+    particleMode: "ember",
+    particleColor: 0xfb923c,
+    particleSize: 0.09,
+    particleOpacity: 0.75,
   },
   FROST: {
     auraColor: 0xbfdbfe,
@@ -592,6 +605,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 1.6,
     trailColor: 0xe0f2fe,
     trailStep: 0.25,
+    particleMode: "frost",
+    particleColor: 0xe0f2fe,
+    particleSize: 0.11,
+    particleOpacity: 0.52,
   },
   NEON: {
     auraColor: 0x22d3ee,
@@ -605,6 +622,10 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.8,
     trailColor: 0x22d3ee,
     trailStep: 0.2,
+    particleMode: "neon",
+    particleColor: 0x22d3ee,
+    particleSize: 0.085,
+    particleOpacity: 0.72,
   },
   VOID: {
     auraColor: 0x7c3aed,
@@ -618,9 +639,14 @@ const SKIN_SPECIAL_EFFECTS = {
     ringSpin: 2.2,
     trailColor: 0xc4b5fd,
     trailStep: 0.23,
+    particleMode: "void",
+    particleColor: 0xa78bfa,
+    particleSize: 0.095,
+    particleOpacity: 0.66,
   },
 };
 const MOWER_SKIN_TRAIL_MAX_POINTS = 42;
+const MOWER_SKIN_PARTICLE_COUNT = 24;
 
 const keys = {};
 let mowerBodyMaterial = null;
@@ -633,6 +659,10 @@ let mowerSkinAuraLight = null;
 let mowerSkinRing = null;
 let mowerSkinRingMaterial = null;
 let mowerSkinTrailLine = null;
+let mowerSkinParticles = null;
+let mowerSkinParticleMaterial = null;
+let mowerSkinParticlePositions = null;
+const mowerSkinParticleState = [];
 let skinFxPulse = 0;
 const mowerSkinTrailPoints = [];
 const mowerSkinTrailLastPos = new THREE.Vector3();
@@ -1607,6 +1637,33 @@ window.setCreativeSpeed = (value) => {
   if (el) el.innerText = creativeSpeed.toFixed(2);
 };
 
+const resetMowerSkinParticles = (fx) => {
+  if (!mowerSkinParticles || !mowerSkinParticlePositions) return;
+  mowerSkinParticleState.length = 0;
+  for (let i = 0; i < MOWER_SKIN_PARTICLE_COUNT; i++) {
+    const particle = {
+      angle: Math.random() * Math.PI * 2,
+      radius: 0.2 + Math.random() * 0.9,
+      height: 0.1 + Math.random() * 0.7,
+      life: 0.2 + Math.random() * 0.9,
+      speed: 0.6 + Math.random() * 1.5,
+    };
+    mowerSkinParticleState.push(particle);
+    const i3 = i * 3;
+    mowerSkinParticlePositions[i3] = mower.position.x;
+    mowerSkinParticlePositions[i3 + 1] = mower.position.y + 0.2;
+    mowerSkinParticlePositions[i3 + 2] = mower.position.z;
+  }
+  if (mowerSkinParticles.geometry?.attributes?.position) {
+    mowerSkinParticles.geometry.attributes.position.needsUpdate = true;
+  }
+  if (mowerSkinParticleMaterial && fx) {
+    mowerSkinParticleMaterial.color.set(fx.particleColor || fx.trailColor);
+    mowerSkinParticleMaterial.opacity = fx.particleOpacity ?? 0.65;
+    mowerSkinParticleMaterial.size = fx.particleSize ?? 0.09;
+  }
+};
+
 window.applySkinVisual = (skinNaam) => {
   if (!mowerBodyMaterial) return;
   const basisKleur = alleSkinKleuren[skinNaam] ?? 0xff0000;
@@ -1666,6 +1723,11 @@ window.applySkinVisual = (skinNaam) => {
     mowerSkinTrailPoints.length = 0;
     mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
     mowerSkinTrailInitialized = false;
+  }
+  if (mowerSkinParticles) {
+    const hasParticles = Boolean(fx && fx.particleMode && fx.particleMode !== "none");
+    mowerSkinParticles.visible = hasParticles;
+    if (hasParticles) resetMowerSkinParticles(fx);
   }
   skinFxPulse = 0;
 };
@@ -3814,6 +3876,26 @@ mowerSkinTrailLine.frustumCulled = false;
 mowerSkinTrailLine.renderOrder = 2;
 scene.add(mowerSkinTrailLine);
 
+const mowerSkinParticleGeometry = new THREE.BufferGeometry();
+mowerSkinParticlePositions = new Float32Array(MOWER_SKIN_PARTICLE_COUNT * 3);
+mowerSkinParticleGeometry.setAttribute(
+  "position",
+  new THREE.BufferAttribute(mowerSkinParticlePositions, 3),
+);
+mowerSkinParticleMaterial = new THREE.PointsMaterial({
+  color: 0xffffff,
+  size: 0.09,
+  transparent: true,
+  opacity: 0.65,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+});
+mowerSkinParticles = new THREE.Points(mowerSkinParticleGeometry, mowerSkinParticleMaterial);
+mowerSkinParticles.frustumCulled = false;
+mowerSkinParticles.renderOrder = 3;
+mowerSkinParticles.visible = false;
+scene.add(mowerSkinParticles);
+
 mower.position.set(0, 0, 0);
 scene.add(mower, new THREE.AmbientLight(0x404040));
 const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -4377,28 +4459,78 @@ function updateMowerSkinFx(deltaSec, mowerIsMoving) {
       mowerSkinRingMaterial.opacity = fx.ringOpacity + pulse01 * 0.08;
     }
   }
-  if (!mowerSkinTrailLine || !mowerSkinTrailLine.visible || !mowerIsMoving) return;
-  const step = Math.max(0.16, Number(fx.trailStep) || 0.24);
-  const pos = new THREE.Vector3(mower.position.x, 0.06, mower.position.z);
-  if (!mowerSkinTrailInitialized) {
-    mowerSkinTrailPoints.push(pos);
-    mowerSkinTrailLastPos.copy(pos);
-    mowerSkinTrailInitialized = true;
-    mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+  if (mowerSkinTrailLine && mowerSkinTrailLine.visible && mowerIsMoving) {
+    const step = Math.max(0.16, Number(fx.trailStep) || 0.24);
+    const pos = new THREE.Vector3(mower.position.x, 0.06, mower.position.z);
+    if (!mowerSkinTrailInitialized) {
+      mowerSkinTrailPoints.push(pos);
+      mowerSkinTrailLastPos.copy(pos);
+      mowerSkinTrailInitialized = true;
+      mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+    } else {
+      const dx = pos.x - mowerSkinTrailLastPos.x;
+      const dz = pos.z - mowerSkinTrailLastPos.z;
+      if (dx * dx + dz * dz >= step * step) {
+        mowerSkinTrailPoints.push(pos);
+        mowerSkinTrailLastPos.copy(pos);
+        if (mowerSkinTrailPoints.length > MOWER_SKIN_TRAIL_MAX_POINTS) {
+          mowerSkinTrailPoints.splice(
+            0,
+            mowerSkinTrailPoints.length - MOWER_SKIN_TRAIL_MAX_POINTS,
+          );
+        }
+        mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+      }
+    }
+  }
+
+  if (
+    !mowerSkinParticles ||
+    !mowerSkinParticles.visible ||
+    !mowerSkinParticlePositions ||
+    !mowerSkinParticleState.length
+  )
     return;
+  const mode = fx.particleMode || "none";
+  for (let i = 0; i < mowerSkinParticleState.length; i++) {
+    const p = mowerSkinParticleState[i];
+    p.life -= deltaSec * (0.7 + p.speed * 0.18);
+    if (p.life <= 0) {
+      p.life = 0.6 + Math.random() * 0.9;
+      p.angle = Math.random() * Math.PI * 2;
+      p.radius = 0.2 + Math.random() * 0.95;
+      p.height = 0.08 + Math.random() * 0.75;
+      p.speed = 0.6 + Math.random() * 1.7;
+    }
+    p.angle += deltaSec * (0.8 + p.speed);
+    const swirl = p.radius * (0.65 + Math.sin(skinFxPulse + i * 0.4) * 0.35);
+    let px = mower.position.x + Math.cos(p.angle) * swirl;
+    let py = mower.position.y + p.height + Math.sin(skinFxPulse + i) * 0.07;
+    let pz = mower.position.z + Math.sin(p.angle) * swirl;
+    if (mode === "ember") {
+      py += 0.2 + (1 - p.life) * 0.9;
+      pz -= 0.55 + (mowerIsMoving ? 0.45 : 0.15);
+    } else if (mode === "frost") {
+      py = mower.position.y + 0.22 + Math.sin(p.angle * 1.3 + skinFxPulse) * 0.08;
+      p.radius = Math.max(0.15, p.radius - deltaSec * 0.05);
+      pz -= 0.2;
+    } else if (mode === "void") {
+      py = mower.position.y + 0.35 + Math.cos(p.angle * 1.4 + skinFxPulse) * 0.22;
+      px += Math.sin(skinFxPulse * 1.4 + i) * 0.14;
+      pz += Math.cos(skinFxPulse * 1.2 + i) * 0.14;
+    } else if (mode === "cyber" || mode === "neon") {
+      py += Math.sin((skinFxPulse + i) * 2.3) * 0.1;
+      pz -= 0.35 + (mowerIsMoving ? 0.35 : 0.08);
+    } else if (mode === "gold") {
+      py += 0.16 + Math.sin(skinFxPulse + i * 1.2) * 0.12;
+    }
+    const i3 = i * 3;
+    mowerSkinParticlePositions[i3] = px;
+    mowerSkinParticlePositions[i3 + 1] = py;
+    mowerSkinParticlePositions[i3 + 2] = pz;
   }
-  const dx = pos.x - mowerSkinTrailLastPos.x;
-  const dz = pos.z - mowerSkinTrailLastPos.z;
-  if (dx * dx + dz * dz < step * step) return;
-  mowerSkinTrailPoints.push(pos);
-  mowerSkinTrailLastPos.copy(pos);
-  if (mowerSkinTrailPoints.length > MOWER_SKIN_TRAIL_MAX_POINTS) {
-    mowerSkinTrailPoints.splice(
-      0,
-      mowerSkinTrailPoints.length - MOWER_SKIN_TRAIL_MAX_POINTS,
-    );
-  }
-  mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+  const posAttr = mowerSkinParticles.geometry?.attributes?.position;
+  if (posAttr) posAttr.needsUpdate = true;
 }
 
 function animate(nowPerf = performance.now()) {
