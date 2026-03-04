@@ -133,6 +133,9 @@ const ONLINE_SPELER_REFRESH_MS = 20 * 1000;
 const PRESENCE_HEARTBEAT_MS = 350;
 const PRESENCE_STALE_MS = 12 * 1000;
 const MULTIPLAYER_DEFAULT_SERVER = "EU-1";
+const CUSTOM_SERVER_PREFIX = "ROOM-";
+const CUSTOM_SERVER_REGEX = /^ROOM-[A-Z0-9]{4,12}$/;
+const CUSTOM_SERVERS_STORAGE_KEY = "grassMasterCustomServersV1";
 const MULTIPLAYER_SERVERS = [
   { id: "EU-1", naam: "EUROPE #1", regio: "Europa", accent: "#60a5fa" },
   { id: "US-1", naam: "AMERICA #1", regio: "Verenigde Staten", accent: "#f59e0b" },
@@ -200,6 +203,7 @@ let chatOnlinePollIntervalId = null;
 let chatCleanupBusy = false;
 let chatOnlineBusy = false;
 let multiplayerServerId = MULTIPLAYER_DEFAULT_SERVER;
+let customServers = [];
 let presenceUnsubscribe = null;
 let presenceHeartbeatId = null;
 let presenceHeartbeatBusy = false;
@@ -400,15 +404,97 @@ const getLeaderboardDisplayName = (data, fallbackId = "") => {
   }
   return fallbackId ? `SPELER ${String(fallbackId).slice(0, 8)}` : "ONBEKEND";
 };
+const createCustomServerDescriptor = (serverId) => {
+  const id = String(serverId || "").toUpperCase();
+  const code = id.startsWith(CUSTOM_SERVER_PREFIX)
+    ? id.slice(CUSTOM_SERVER_PREFIX.length)
+    : id;
+  return {
+    id,
+    naam: `ROOM ${code}`,
+    regio: "Prive server",
+    accent: "#ec4899",
+    isCustom: true,
+  };
+};
+const sanitizeCustomServers = (value) => {
+  if (!Array.isArray(value)) return [];
+  const result = [];
+  const seen = new Set();
+  for (const item of value) {
+    const id = String(item?.id || "").trim().toUpperCase();
+    if (!CUSTOM_SERVER_REGEX.test(id) || seen.has(id)) continue;
+    const naam =
+      typeof item?.naam === "string" && item.naam.trim()
+        ? item.naam.trim().slice(0, 36)
+        : createCustomServerDescriptor(id).naam;
+    const regio =
+      typeof item?.regio === "string" && item.regio.trim()
+        ? item.regio.trim().slice(0, 32)
+        : "Prive server";
+    const accent =
+      typeof item?.accent === "string" && item.accent.trim()
+        ? item.accent.trim()
+        : "#ec4899";
+    result.push({ id, naam, regio, accent, isCustom: true });
+    seen.add(id);
+  }
+  return result;
+};
+const saveCustomServersLocal = () => {
+  try {
+    localStorage.setItem(CUSTOM_SERVERS_STORAGE_KEY, JSON.stringify(customServers));
+  } catch {}
+};
+const loadCustomServersLocal = () => {
+  try {
+    const raw = localStorage.getItem(CUSTOM_SERVERS_STORAGE_KEY);
+    if (!raw) return [];
+    return sanitizeCustomServers(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+};
+const getAlleServers = () => [...MULTIPLAYER_SERVERS, ...customServers];
+const registerCustomServer = (serverId, opties = {}) => {
+  const id = String(serverId || "").trim().toUpperCase();
+  if (!CUSTOM_SERVER_REGEX.test(id)) return null;
+  const bestaand = customServers.find((server) => server.id === id);
+  if (bestaand) return bestaand;
+  const basis = createCustomServerDescriptor(id);
+  const server = {
+    ...basis,
+    ...(typeof opties?.naam === "string" && opties.naam.trim()
+      ? { naam: opties.naam.trim().slice(0, 36) }
+      : {}),
+    ...(typeof opties?.regio === "string" && opties.regio.trim()
+      ? { regio: opties.regio.trim().slice(0, 32) }
+      : {}),
+    ...(typeof opties?.accent === "string" && opties.accent.trim()
+      ? { accent: opties.accent.trim() }
+      : {}),
+    isCustom: true,
+  };
+  customServers.push(server);
+  if (opties.persist !== false) saveCustomServersLocal();
+  return server;
+};
+customServers = loadCustomServersLocal();
 const normalizeServerId = (rawId) => {
   const id = String(rawId ?? "").trim().toUpperCase();
-  return MULTIPLAYER_SERVERS.some((server) => server.id === id)
-    ? id
-    : MULTIPLAYER_DEFAULT_SERVER;
+  if (MULTIPLAYER_SERVERS.some((server) => server.id === id)) return id;
+  if (CUSTOM_SERVER_REGEX.test(id)) return id;
+  return MULTIPLAYER_DEFAULT_SERVER;
 };
-const getServerById = (serverId) =>
-  MULTIPLAYER_SERVERS.find((server) => server.id === normalizeServerId(serverId)) ||
-  MULTIPLAYER_SERVERS[0];
+const getServerById = (serverId) => {
+  const normalized = normalizeServerId(serverId);
+  const bestaande = getAlleServers().find((server) => server.id === normalized);
+  if (bestaande) return bestaande;
+  if (CUSTOM_SERVER_REGEX.test(normalized)) {
+    return registerCustomServer(normalized, { persist: false }) || createCustomServerDescriptor(normalized);
+  }
+  return MULTIPLAYER_SERVERS[0];
+};
 const formatPlaytime = (seconds) => {
   const s = Math.max(0, Math.floor(Number(seconds) || 0));
   const uren = Math.floor(s / 3600);
@@ -527,8 +613,9 @@ const subscribePresence = () => {
   }
   const actieveServerId = normalizeServerId(multiplayerServerId);
   const presenceQuery = query(
-    collection(firebaseDb, FIREBASE_PRESENCE_COLLECTION),
-    limit(180),
+    collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
+    where("multiplayerServerId", "==", actieveServerId),
+    limit(250),
   );
   presenceUnsubscribe = onSnapshot(
     presenceQuery,
@@ -539,11 +626,17 @@ const subscribePresence = () => {
         const uid = String(docSnap.id);
         if (!uid || uid === selfUid) return;
         const data = docSnap.data() || {};
-        if (normalizeServerId(data.serverId) !== actieveServerId) return;
-        if (!data.updatedAt || typeof data.updatedAt.toDate !== "function") return;
-        if (Date.now() - data.updatedAt.toDate().getTime() > PRESENCE_STALE_MS) return;
+        if (!data.presenceUpdatedAt || typeof data.presenceUpdatedAt.toDate !== "function")
+          return;
+        if (Date.now() - data.presenceUpdatedAt.toDate().getTime() > PRESENCE_STALE_MS)
+          return;
         gevonden.add(uid);
-        upsertRemotePlayer(uid, data);
+        upsertRemotePlayer(uid, {
+          x: data.presenceX,
+          z: data.presenceZ,
+          rotationY: data.presenceRotationY,
+          skin: data.presenceSkin,
+        });
       });
       for (const [uid, remote] of remotePlayers) {
         if (gevonden.has(uid)) continue;
@@ -562,16 +655,14 @@ const publishPresence = async () => {
   presenceHeartbeatBusy = true;
   try {
     await setDoc(
-      getPresenceDocRef(ingelogdeGebruiker.uid),
+      getSaveDocRef(ingelogdeGebruiker.uid),
       {
-        uid: String(ingelogdeGebruiker.uid || ""),
-        displayName: getChatDisplayName(),
-        serverId: normalizeServerId(multiplayerServerId),
-        x: mower.position.x,
-        z: mower.position.z,
-        rotationY: mower.rotation.y,
-        skin: huidigeSkin,
-        updatedAt: serverTimestamp(),
+        multiplayerServerId: normalizeServerId(multiplayerServerId),
+        presenceX: mower.position.x,
+        presenceZ: mower.position.z,
+        presenceRotationY: mower.rotation.y,
+        presenceSkin: huidigeSkin,
+        presenceUpdatedAt: serverTimestamp(),
       },
       { merge: true },
     );
@@ -1205,6 +1296,7 @@ window.maakBasicSnapshot = () => ({
   shopUpgradeLevel,
   shopUpgradePrijs,
   multiplayerServerId,
+  customServers: [...customServers],
   rebirtCount,
   verdienMultiplier,
   radDraaiCount,
@@ -1250,7 +1342,12 @@ window.herstelBasicSnapshot = (snapshot) => {
   ontgrendeldeSkins = [...snapshot.ontgrendeldeSkins];
   shopUpgradeLevel = snapshot.shopUpgradeLevel;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
+  if (Array.isArray(snapshot.customServers)) {
+    customServers = sanitizeCustomServers(snapshot.customServers);
+    saveCustomServersLocal();
+  }
   multiplayerServerId = normalizeServerId(snapshot.multiplayerServerId);
+  if (CUSTOM_SERVER_REGEX.test(multiplayerServerId)) registerCustomServer(multiplayerServerId);
   rebirtCount = Number.isFinite(snapshot.rebirtCount) ? snapshot.rebirtCount : 0;
   shopUpgradeLevel = 0;
   verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
@@ -1527,11 +1624,42 @@ window.openLeaderboard = async () => {
 
 window.selectMultiplayerServer = async (serverId) => {
   multiplayerServerId = normalizeServerId(serverId);
+  if (CUSTOM_SERVER_REGEX.test(multiplayerServerId)) {
+    registerCustomServer(multiplayerServerId);
+  }
   await window.save(true);
   subscribeChat();
   refreshOnlineSpelers();
   refreshPresenceSync();
   await window.openMultiplayerServers();
+};
+
+window.createCustomServer = async () => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  const id = `${CUSTOM_SERVER_PREFIX}${code}`;
+  registerCustomServer(id);
+  await window.selectMultiplayerServer(id);
+  alert(`Prive server gemaakt: ${id}\nDeel deze code met je vriend(en).`);
+};
+
+window.joinCustomServerViaCode = async () => {
+  const raw = (prompt("Voer servercode in (bijv. ROOM-ABC123 of ABC123):") || "")
+    .trim()
+    .toUpperCase();
+  if (!raw) return;
+  const normalizedInput = raw.startsWith(CUSTOM_SERVER_PREFIX)
+    ? raw
+    : `${CUSTOM_SERVER_PREFIX}${raw}`;
+  if (!CUSTOM_SERVER_REGEX.test(normalizedInput)) {
+    alert("Ongeldige servercode.");
+    return;
+  }
+  registerCustomServer(normalizedInput);
+  await window.selectMultiplayerServer(normalizedInput);
 };
 
 window.openMultiplayerServers = async () => {
@@ -1564,17 +1692,23 @@ window.openMultiplayerServers = async () => {
     );
     const snap = await getDocs(onlineQuery);
     const spelersPerServer = new Map();
-    for (const server of MULTIPLAYER_SERVERS) spelersPerServer.set(server.id, []);
+    const serverLijst = [...getAlleServers()];
+    for (const server of serverLijst) spelersPerServer.set(server.id, []);
     snap.forEach((docSnap) => {
       const data = docSnap.data() || {};
       const serverId = normalizeServerId(data.multiplayerServerId);
+      if (CUSTOM_SERVER_REGEX.test(serverId) && !spelersPerServer.has(serverId)) {
+        registerCustomServer(serverId, { persist: false });
+        serverLijst.push(getServerById(serverId));
+        spelersPerServer.set(serverId, []);
+      }
       const naam = getLeaderboardDisplayName(data, docSnap.id);
       const lijst = spelersPerServer.get(serverId) || [];
       lijst.push(naam);
       spelersPerServer.set(serverId, lijst);
     });
 
-    const serversHtml = MULTIPLAYER_SERVERS.map((server) => {
+    const serversHtml = serverLijst.map((server) => {
       const spelers = spelersPerServer.get(server.id) || [];
       const isActief = normalizeServerId(multiplayerServerId) === server.id;
       const maxPreview = 6;
@@ -1607,6 +1741,10 @@ window.openMultiplayerServers = async () => {
     overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #8b5cf6; border-radius:30px; text-align:center; min-width:680px; max-width:900px; max-height:85vh; overflow-y:auto;">
       <h1 style="color:#c4b5fd; font-size:52px; margin-bottom:8px;">MULTIPLAYER SERVERS</h1>
       <p style="margin-bottom:12px; color:#ddd6fe;">Server kiezen bepaalt je online lobby, chat en zichtbare spelers.</p>
+      <div style="display:flex; gap:10px; justify-content:center; margin-bottom:14px;">
+        <button onclick="window.createCustomServer()" style="padding:12px 22px; background:#ec4899; color:white; border:2px solid white; border-radius:10px; font-family:Impact; font-size:20px; cursor:pointer;">CREATE PRIVE SERVER</button>
+        <button onclick="window.joinCustomServerViaCode()" style="padding:12px 22px; background:#0ea5e9; color:white; border:2px solid white; border-radius:10px; font-family:Impact; font-size:20px; cursor:pointer;">JOIN VIA CODE</button>
+      </div>
       ${serversHtml}
       <button onclick="window.sluit()" style="margin-top:18px; padding:14px 56px; background:#8b5cf6; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
     </div>`;
@@ -2187,6 +2325,7 @@ window.getSaveData = () => ({
   shopUpgradeLevel,
   shopUpgradePrijs,
   multiplayerServerId,
+  customServers: [...customServers],
   rebirtCount,
   verdienMultiplier,
   totaalSpeeltijdSec,
@@ -2256,7 +2395,12 @@ window.applySaveData = (d) => {
   diamanten = Number.isFinite(d.diamanten) ? d.diamanten : 0;
   shopUpgradeLevel = 0;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
+  if (Array.isArray(d.customServers)) {
+    customServers = sanitizeCustomServers(d.customServers);
+    saveCustomServersLocal();
+  }
   multiplayerServerId = normalizeServerId(d.multiplayerServerId);
+  if (CUSTOM_SERVER_REGEX.test(multiplayerServerId)) registerCustomServer(multiplayerServerId);
   rebirtCount = Number.isFinite(d.rebirtCount) ? d.rebirtCount : 0;
   verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
   totaalSpeeltijdSec = Number.isFinite(d.totaalSpeeltijdSec)
@@ -2413,6 +2557,8 @@ window.load = () => {
 window.finalReset = async () => {
   localStorage.removeItem(LOCAL_SAVE_KEY);
   localStorage.removeItem(CREATIVE_BACKUP_KEY);
+  localStorage.removeItem(CUSTOM_SERVERS_STORAGE_KEY);
+  customServers = [];
   if (firebaseDb && ingelogdeGebruiker) {
     try {
       await deleteDoc(getSaveDocRef(ingelogdeGebruiker.uid));
