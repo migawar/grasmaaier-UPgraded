@@ -122,6 +122,7 @@ const LOCAL_SAVE_KEY = "grassMasterSaveV2";
 const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
 const FIREBASE_SAVE_COLLECTION = "saves";
 const FIREBASE_CHAT_COLLECTION = "global_chat";
+const FIREBASE_PRESENCE_COLLECTION = "presence";
 const CHAT_MAX_BERICHT_LENGTE = 200;
 const CHAT_MAX_BERICHTEN = 40;
 const CHAT_BERICHT_MAX_LEEFTIJD_MS = 24 * 60 * 60 * 1000;
@@ -129,6 +130,8 @@ const CHAT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const CHAT_CLEANUP_BATCH_SIZE = 100;
 const ONLINE_SPELER_WINDOW_MS = 45 * 1000;
 const ONLINE_SPELER_REFRESH_MS = 20 * 1000;
+const PRESENCE_HEARTBEAT_MS = 350;
+const PRESENCE_STALE_MS = 12 * 1000;
 const MULTIPLAYER_DEFAULT_SERVER = "EU-1";
 const MULTIPLAYER_SERVERS = [
   { id: "EU-1", naam: "EUROPE #1", regio: "Europa", accent: "#60a5fa" },
@@ -190,6 +193,10 @@ let chatOnlinePollIntervalId = null;
 let chatCleanupBusy = false;
 let chatOnlineBusy = false;
 let multiplayerServerId = MULTIPLAYER_DEFAULT_SERVER;
+let presenceUnsubscribe = null;
+let presenceHeartbeatId = null;
+let presenceHeartbeatBusy = false;
+const remotePlayers = new Map();
 
 const maanden = [
   "JANUARI",
@@ -334,6 +341,8 @@ const normalizeGameMode = (mode) =>
   mode === "creative" ? "creative" : "classic";
 const getSaveDocRef = (uid) =>
   doc(firebaseDb, FIREBASE_SAVE_COLLECTION, String(uid));
+const getPresenceDocRef = (uid) =>
+  doc(firebaseDb, FIREBASE_PRESENCE_COLLECTION, String(uid));
 const escapeHtml = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -372,6 +381,180 @@ const formatPlaytime = (seconds) => {
   const sec = s % 60;
   const pad = (v) => String(v).padStart(2, "0");
   return `${pad(uren)}:${pad(minuten)}:${pad(sec)}`;
+};
+const stopPresenceSubscription = () => {
+  if (!presenceUnsubscribe) return;
+  presenceUnsubscribe();
+  presenceUnsubscribe = null;
+};
+const stopPresenceHeartbeat = () => {
+  if (!presenceHeartbeatId) return;
+  clearInterval(presenceHeartbeatId);
+  presenceHeartbeatId = null;
+  presenceHeartbeatBusy = false;
+};
+const disposeRemotePlayer = (remote) => {
+  if (!remote?.group) return;
+  remote.group.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    if (child.geometry) child.geometry.dispose();
+    if (Array.isArray(child.material)) {
+      child.material.forEach((mat) => mat?.dispose?.());
+      return;
+    }
+    child.material?.dispose?.();
+  });
+  scene.remove(remote.group);
+};
+const clearRemotePlayers = () => {
+  remotePlayers.forEach((remote) => disposeRemotePlayer(remote));
+  remotePlayers.clear();
+};
+const makeRemotePlayerMesh = () => {
+  const group = new THREE.Group();
+  const bodyMaterial = new THREE.MeshPhongMaterial({
+    color: 0x3f8f2f,
+    emissive: 0x1f1f1f,
+    emissiveIntensity: 0.25,
+    specular: 0xb7bcc6,
+    shininess: 65,
+  });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.34, 1.16), bodyMaterial);
+  body.position.set(0, 0.42, 0.12);
+  group.add(body);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.12, 1.2), bodyMaterial);
+  deck.position.set(0, 0.2, 0.72);
+  group.add(deck);
+  const marker = new THREE.Mesh(
+    new THREE.ConeGeometry(0.18, 0.34, 16),
+    new THREE.MeshBasicMaterial({ color: 0xf8fafc }),
+  );
+  marker.position.set(0, 1.15, 0);
+  marker.rotation.x = Math.PI;
+  group.add(marker);
+  return { group, bodyMaterial };
+};
+const setRemotePlayerSkin = (remote, skinNaam) => {
+  if (!remote?.bodyMaterial) return;
+  const basisKleur = alleSkinKleuren[skinNaam] ?? alleSkinKleuren.STARTER ?? 0x3f8f2f;
+  remote.bodyMaterial.color.set(basisKleur);
+  remote.bodyMaterial.emissive.set(skinNaam === "BLUE" ? 0x12366f : 0x1a1a1a);
+  remote.bodyMaterial.shininess = skinNaam === "BLUE" ? 95 : 65;
+};
+const upsertRemotePlayer = (uid, data) => {
+  let remote = remotePlayers.get(uid);
+  if (!remote) {
+    const mesh = makeRemotePlayerMesh();
+    scene.add(mesh.group);
+    remote = {
+      ...mesh,
+      targetPos: new THREE.Vector3(),
+      targetRotY: 0,
+      lastSeenMs: 0,
+    };
+    remotePlayers.set(uid, remote);
+  }
+  const x = Number.isFinite(Number(data?.x)) ? Number(data.x) : 0;
+  const z = Number.isFinite(Number(data?.z)) ? Number(data.z) : 0;
+  const rotY = Number.isFinite(Number(data?.rotationY)) ? Number(data.rotationY) : 0;
+  remote.targetPos.set(x, 0, z);
+  remote.targetRotY = rotY;
+  remote.lastSeenMs = Date.now();
+  setRemotePlayerSkin(remote, String(data?.skin || "STARTER").toUpperCase());
+};
+const trimStaleRemotePlayers = () => {
+  const now = Date.now();
+  for (const [uid, remote] of remotePlayers) {
+    if (now - remote.lastSeenMs <= PRESENCE_STALE_MS) continue;
+    disposeRemotePlayer(remote);
+    remotePlayers.delete(uid);
+  }
+};
+const lerpAngle = (from, to, t) => {
+  const TWO_PI = Math.PI * 2;
+  let delta = ((to - from + Math.PI) % TWO_PI) - Math.PI;
+  if (delta < -Math.PI) delta += TWO_PI;
+  return from + delta * t;
+};
+const updateRemotePlayersVisual = (deltaSec) => {
+  if (!remotePlayers.size) return;
+  const t = Math.min(1, deltaSec * 10);
+  for (const remote of remotePlayers.values()) {
+    remote.group.position.lerp(remote.targetPos, t);
+    remote.group.rotation.y = lerpAngle(remote.group.rotation.y, remote.targetRotY, t);
+  }
+};
+const subscribePresence = () => {
+  stopPresenceSubscription();
+  if (!firebaseDb || !ingelogdeGebruiker) {
+    clearRemotePlayers();
+    return;
+  }
+  const actieveServerId = normalizeServerId(multiplayerServerId);
+  const presenceQuery = query(
+    collection(firebaseDb, FIREBASE_PRESENCE_COLLECTION),
+    limit(180),
+  );
+  presenceUnsubscribe = onSnapshot(
+    presenceQuery,
+    (snapshot) => {
+      const selfUid = String(ingelogdeGebruiker?.uid || "");
+      const gevonden = new Set();
+      snapshot.forEach((docSnap) => {
+        const uid = String(docSnap.id);
+        if (!uid || uid === selfUid) return;
+        const data = docSnap.data() || {};
+        if (normalizeServerId(data.serverId) !== actieveServerId) return;
+        if (!data.updatedAt || typeof data.updatedAt.toDate !== "function") return;
+        if (Date.now() - data.updatedAt.toDate().getTime() > PRESENCE_STALE_MS) return;
+        gevonden.add(uid);
+        upsertRemotePlayer(uid, data);
+      });
+      for (const [uid, remote] of remotePlayers) {
+        if (gevonden.has(uid)) continue;
+        disposeRemotePlayer(remote);
+        remotePlayers.delete(uid);
+      }
+    },
+    (err) => {
+      console.error("Presence stream fout:", err);
+      clearRemotePlayers();
+    },
+  );
+};
+const publishPresence = async () => {
+  if (!firebaseDb || !ingelogdeGebruiker || presenceHeartbeatBusy) return;
+  presenceHeartbeatBusy = true;
+  try {
+    await setDoc(
+      getPresenceDocRef(ingelogdeGebruiker.uid),
+      {
+        uid: String(ingelogdeGebruiker.uid || ""),
+        displayName: getChatDisplayName(),
+        serverId: normalizeServerId(multiplayerServerId),
+        x: mower.position.x,
+        z: mower.position.z,
+        rotationY: mower.rotation.y,
+        skin: huidigeSkin,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (err) {
+    console.error("Presence publish mislukt:", err);
+  } finally {
+    presenceHeartbeatBusy = false;
+  }
+};
+const startPresenceHeartbeat = () => {
+  stopPresenceHeartbeat();
+  if (!firebaseDb || !ingelogdeGebruiker) return;
+  publishPresence();
+  presenceHeartbeatId = setInterval(publishPresence, PRESENCE_HEARTBEAT_MS);
+};
+const refreshPresenceSync = () => {
+  startPresenceHeartbeat();
+  subscribePresence();
 };
 const getAccountLabel = () => {
   if (!ingelogdeGebruiker) return "NIET INGELOGD";
@@ -677,6 +860,9 @@ const refreshChatForAuthState = () => {
     stopChatSubscription();
     stopChatCleanup();
     stopOnlinePoll();
+    stopPresenceHeartbeat();
+    stopPresenceSubscription();
+    clearRemotePlayers();
     setChatOnlineCount(0);
     setChatStatus("Log in met Google", "#f59e0b");
   }
@@ -1309,6 +1495,7 @@ window.selectMultiplayerServer = async (serverId) => {
   await window.save(true);
   subscribeChat();
   refreshOnlineSpelers();
+  refreshPresenceSync();
   await window.openMultiplayerServers();
 };
 
@@ -2072,6 +2259,7 @@ window.initFirebase = () => {
       refreshChatForAuthState();
       subscribeChat();
       startChatMaintenance();
+      refreshPresenceSync();
     });
   } catch (err) {
     console.error("Firebase init mislukt:", err);
@@ -2149,6 +2337,7 @@ window.finalReset = async () => {
   if (firebaseDb && ingelogdeGebruiker) {
     try {
       await deleteDoc(getSaveDocRef(ingelogdeGebruiker.uid));
+      await deleteDoc(getPresenceDocRef(ingelogdeGebruiker.uid));
     } catch (err) {
       console.error("Cloud reset mislukt:", err);
     }
@@ -2862,6 +3051,8 @@ function animate(nowPerf = performance.now()) {
   const lookLerp = 1 - Math.exp(-CAMERA_LOOK_SMOOTHNESS * deltaSec);
   cameraLookTarget.lerp(desiredLookTarget, lookLerp);
   camera.lookAt(cameraLookTarget);
+  trimStaleRemotePlayers();
+  updateRemotePlayersVisual(deltaSec);
   renderer.render(scene, camera);
 }
 
