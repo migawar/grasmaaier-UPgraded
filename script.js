@@ -527,6 +527,100 @@ const skinVisualOverrides = {
     shininess: 88,
   },
 };
+const SKIN_SPECIAL_EFFECTS = {
+  BLUE: {
+    auraColor: 0x4aa3ff,
+    auraBase: 1.05,
+    auraPulse: 0.25,
+    pulseSpeed: 4.8,
+    ringColor: 0x9ed8ff,
+    ringOpacity: 0.35,
+    ringScaleBase: 1,
+    ringScalePulse: 0.05,
+    ringSpin: 2.1,
+    trailColor: 0x7dd3fc,
+    trailStep: 0.26,
+  },
+  GOLDEN: {
+    auraColor: 0xfacc15,
+    auraBase: 1.1,
+    auraPulse: 0.3,
+    pulseSpeed: 3.2,
+    ringColor: 0xfde68a,
+    ringOpacity: 0.4,
+    ringScaleBase: 1.02,
+    ringScalePulse: 0.08,
+    ringSpin: 1.5,
+    trailColor: 0xfef08a,
+    trailStep: 0.24,
+  },
+  CYBER: {
+    auraColor: 0x00e5ff,
+    auraBase: 1.2,
+    auraPulse: 0.35,
+    pulseSpeed: 6.5,
+    ringColor: 0x67e8f9,
+    ringOpacity: 0.45,
+    ringScaleBase: 1,
+    ringScalePulse: 0.09,
+    ringSpin: 3.1,
+    trailColor: 0x67e8f9,
+    trailStep: 0.2,
+  },
+  EMBER: {
+    auraColor: 0xfb7185,
+    auraBase: 1.08,
+    auraPulse: 0.28,
+    pulseSpeed: 5.2,
+    ringColor: 0xfb923c,
+    ringOpacity: 0.4,
+    ringScaleBase: 1.01,
+    ringScalePulse: 0.11,
+    ringSpin: 2.7,
+    trailColor: 0xfb923c,
+    trailStep: 0.22,
+  },
+  FROST: {
+    auraColor: 0xbfdbfe,
+    auraBase: 1.02,
+    auraPulse: 0.24,
+    pulseSpeed: 3.9,
+    ringColor: 0xdbeafe,
+    ringOpacity: 0.34,
+    ringScaleBase: 1.02,
+    ringScalePulse: 0.06,
+    ringSpin: 1.6,
+    trailColor: 0xe0f2fe,
+    trailStep: 0.25,
+  },
+  NEON: {
+    auraColor: 0x22d3ee,
+    auraBase: 1.15,
+    auraPulse: 0.33,
+    pulseSpeed: 6,
+    ringColor: 0x22d3ee,
+    ringOpacity: 0.46,
+    ringScaleBase: 1.01,
+    ringScalePulse: 0.08,
+    ringSpin: 2.8,
+    trailColor: 0x22d3ee,
+    trailStep: 0.2,
+  },
+  VOID: {
+    auraColor: 0x7c3aed,
+    auraBase: 1.18,
+    auraPulse: 0.4,
+    pulseSpeed: 4.1,
+    ringColor: 0xa78bfa,
+    ringOpacity: 0.42,
+    ringScaleBase: 1.03,
+    ringScalePulse: 0.1,
+    ringSpin: 2.2,
+    trailColor: 0xc4b5fd,
+    trailStep: 0.23,
+  },
+};
+const MOWER_SKIN_TRAIL_MAX_POINTS = 42;
 
 const keys = {};
 let mowerBodyMaterial = null;
@@ -535,6 +629,14 @@ let mowerRedBlock = null;
 let mowerBlueKit = null;
 let mowerBlueRotors = [];
 let mowerBlueAuraLight = null;
+let mowerSkinAuraLight = null;
+let mowerSkinRing = null;
+let mowerSkinRingMaterial = null;
+let mowerSkinTrailLine = null;
+let skinFxPulse = 0;
+const mowerSkinTrailPoints = [];
+const mowerSkinTrailLastPos = new THREE.Vector3();
+let mowerSkinTrailInitialized = false;
 let blueAuraPulse = 0;
 const normalizeGameMode = (mode) =>
   mode === "creative" ? "creative" : "classic";
@@ -1542,6 +1644,30 @@ window.applySkinVisual = (skinNaam) => {
     : emissiveIntensity;
   mowerBodyMaterial.specular.set(specular);
   mowerBodyMaterial.shininess = isBlue ? shininess + 22 : shininess;
+
+  const fx = SKIN_SPECIAL_EFFECTS[skinNaam] || null;
+  if (mowerSkinAuraLight) {
+    mowerSkinAuraLight.visible = Boolean(fx);
+    if (fx) {
+      mowerSkinAuraLight.color.set(fx.auraColor);
+      mowerSkinAuraLight.intensity = fx.auraBase;
+    }
+  }
+  if (mowerSkinRing) mowerSkinRing.visible = Boolean(fx);
+  if (mowerSkinRingMaterial && fx) {
+    mowerSkinRingMaterial.color.set(fx.ringColor);
+    mowerSkinRingMaterial.opacity = fx.ringOpacity;
+  }
+  if (mowerSkinTrailLine) {
+    mowerSkinTrailLine.visible = Boolean(fx);
+    if (fx && mowerSkinTrailLine.material?.color) {
+      mowerSkinTrailLine.material.color.set(fx.trailColor);
+    }
+    mowerSkinTrailPoints.length = 0;
+    mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+    mowerSkinTrailInitialized = false;
+  }
+  skinFxPulse = 0;
 };
 
 window.maakBasicSnapshot = () => ({
@@ -3656,6 +3782,38 @@ mowerBlueAuraLight.position.set(0, 0.8, 0.2);
 mowerBlueAuraLight.visible = false;
 mower.add(mowerBlueAuraLight);
 
+mowerSkinAuraLight = new THREE.PointLight(0xffffff, 1.1, 9.5, 2);
+mowerSkinAuraLight.position.set(0, 0.62, -0.05);
+mowerSkinAuraLight.visible = false;
+mower.add(mowerSkinAuraLight);
+
+mowerSkinRingMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.35,
+});
+mowerSkinRing = new THREE.Mesh(
+  new THREE.TorusGeometry(0.9, 0.06, 10, 34),
+  mowerSkinRingMaterial,
+);
+mowerSkinRing.rotation.x = Math.PI / 2;
+mowerSkinRing.position.set(0, 0.12, 0.1);
+mowerSkinRing.visible = false;
+mower.add(mowerSkinRing);
+
+mowerSkinTrailLine = new THREE.Line(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({
+    color: 0x93c5fd,
+    transparent: true,
+    opacity: 0.75,
+  }),
+);
+mowerSkinTrailLine.visible = false;
+mowerSkinTrailLine.frustumCulled = false;
+mowerSkinTrailLine.renderOrder = 2;
+scene.add(mowerSkinTrailLine);
+
 mower.position.set(0, 0, 0);
 scene.add(mower, new THREE.AmbientLight(0x404040));
 const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -4203,6 +4361,46 @@ function updateFpsMeter() {
   if (fpsEl) fpsEl.innerText = `FPS: ${fps}`;
 }
 
+function updateMowerSkinFx(deltaSec, mowerIsMoving) {
+  const fx = SKIN_SPECIAL_EFFECTS[huidigeSkin];
+  if (!fx) return;
+  skinFxPulse += deltaSec * fx.pulseSpeed;
+  const pulse01 = 0.5 + Math.sin(skinFxPulse) * 0.5;
+  if (mowerSkinAuraLight && mowerSkinAuraLight.visible) {
+    mowerSkinAuraLight.intensity = fx.auraBase + pulse01 * fx.auraPulse;
+  }
+  if (mowerSkinRing && mowerSkinRing.visible) {
+    const ringScale = fx.ringScaleBase + pulse01 * fx.ringScalePulse;
+    mowerSkinRing.scale.set(ringScale, ringScale, 1);
+    mowerSkinRing.rotation.z += deltaSec * fx.ringSpin;
+    if (mowerSkinRingMaterial) {
+      mowerSkinRingMaterial.opacity = fx.ringOpacity + pulse01 * 0.08;
+    }
+  }
+  if (!mowerSkinTrailLine || !mowerSkinTrailLine.visible || !mowerIsMoving) return;
+  const step = Math.max(0.16, Number(fx.trailStep) || 0.24);
+  const pos = new THREE.Vector3(mower.position.x, 0.06, mower.position.z);
+  if (!mowerSkinTrailInitialized) {
+    mowerSkinTrailPoints.push(pos);
+    mowerSkinTrailLastPos.copy(pos);
+    mowerSkinTrailInitialized = true;
+    mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+    return;
+  }
+  const dx = pos.x - mowerSkinTrailLastPos.x;
+  const dz = pos.z - mowerSkinTrailLastPos.z;
+  if (dx * dx + dz * dz < step * step) return;
+  mowerSkinTrailPoints.push(pos);
+  mowerSkinTrailLastPos.copy(pos);
+  if (mowerSkinTrailPoints.length > MOWER_SKIN_TRAIL_MAX_POINTS) {
+    mowerSkinTrailPoints.splice(
+      0,
+      mowerSkinTrailPoints.length - MOWER_SKIN_TRAIL_MAX_POINTS,
+    );
+  }
+  mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+}
+
 function animate(nowPerf = performance.now()) {
   requestAnimationFrame(animate);
   const frameDeltaMs = Math.max(0, Math.min(250, nowPerf - lastFrameTime));
@@ -4271,6 +4469,7 @@ function animate(nowPerf = performance.now()) {
     blueAuraPulse += deltaSec * 4.6;
     mowerBlueAuraLight.intensity = 1.05 + Math.sin(blueAuraPulse) * 0.2;
   }
+  updateMowerSkinFx(deltaSec, mowerIsMoving);
   updateFpsMeter();
   updateGroundTiles();
   const effectieveRadius =
@@ -4368,7 +4567,6 @@ const isGeladen = window.load();
 if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
 window.initFirebase();
-
 setInterval(() => window.save(), 5000);
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
