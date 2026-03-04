@@ -126,6 +126,7 @@ const FIREBASE_CHAT_COLLECTION = "global_chat";
 const FIREBASE_PRESENCE_COLLECTION = "presence";
 const FIREBASE_PVP_LOBBY_COLLECTION = "pvp_lobbies";
 const FIREBASE_PVP_SCORE_COLLECTION = "pvp_scores";
+const FIREBASE_DUEL_INVITES_COLLECTION = "duel_invites";
 const CHAT_MAX_BERICHT_LENGTE = 200;
 const CHAT_MAX_BERICHTEN = 40;
 const CHAT_BERICHT_MAX_LEEFTIJD_MS = 24 * 60 * 60 * 1000;
@@ -143,6 +144,7 @@ const PVP_SCORE_PUSH_MS = 1500;
 const PVP_FORCE_SPEED = 0.11;
 const PVP_FORCE_RADIUS = 2.15;
 const PVP_WIN_REWARD_DIAMANT = 3;
+const EVENT_SKIN_LEVEL_REQUIREMENT = 50;
 const MULTIPLAYER_DEFAULT_SERVER = "EU-1";
 const CUSTOM_SERVER_PREFIX = "ROOM-";
 const CUSTOM_SERVER_REGEX = /^ROOM-[A-Z0-9]{4,12}$/;
@@ -234,6 +236,7 @@ const MAP_PRESETS = [
 const PVP_MODES = [
   { id: "MOST_GRASS", naam: "MEEST GRAS" },
   { id: "MOST_DISTANCE", naam: "MEEST AFSTAND" },
+  { id: "DUEL_GRASS", naam: "DUEL 1V1" },
 ];
 const REMOTE_TRAIL_POINT_DISTANCE = 0.55;
 const REMOTE_TRAIL_MAX_POINTS = 64;
@@ -300,6 +303,7 @@ let presenceHeartbeatBusy = false;
 let pvpLobbyUnsubscribe = null;
 let pvpScoreUnsubscribe = null;
 let pvpScoreIntervalId = null;
+let duelInviteUnsubscribe = null;
 const pvpState = {
   active: false,
   gameId: "",
@@ -311,6 +315,7 @@ const pvpState = {
   score: 0,
   leaderboard: [],
   rewardDoneForGameId: "",
+  allowedUids: [],
 };
 let lastPresenceSnapshot = {
   initialized: false,
@@ -324,6 +329,8 @@ let lastPresenceSnapshot = {
 const remotePlayers = new Map();
 const mapObstacles = [];
 let mapObstacleGroup = null;
+const mapDecorObjects = [];
+let mapDecorGroup = null;
 
 const maanden = [
   "JANUARI",
@@ -506,6 +513,8 @@ const getPvpScoreDocRef = (serverId, uid) =>
     FIREBASE_PVP_SCORE_COLLECTION,
     `${normalizeServerId(serverId)}__${String(uid || "")}`,
   );
+const getDuelInviteDocRef = (inviteId) =>
+  doc(firebaseDb, FIREBASE_DUEL_INVITES_COLLECTION, String(inviteId || ""));
 const escapeHtml = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1299,6 +1308,7 @@ ui.innerHTML = `
     <div id="rightPanel" style="position:absolute; bottom:25px; right:25px; display:flex; flex-direction:column; gap:10px; align-items:flex-end; pointer-events:auto;">
         <button onclick="window.openCheat()" style="background:#e74c3c; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">REDEEM CODE</button>
         <button onclick="window.openPvpMiniGames()" style="background:#0ea5e9; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">PVP MINIGAMES</button>
+        <button onclick="window.openDuelInviteMenu()" style="background:#22c55e; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">DUEL UITNODIGEN</button>
         <button id="eventBtn" onclick="window.openEvent()" style="background:#9b59b6; color:white; border:5px solid white; padding:20px 45px; border-radius:20px; font-size:24px; cursor:pointer; font-family:Impact;">EVENT</button>
     </div>
     <div id="saveToast" style="position:absolute; bottom:10px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,0.5); font-size:12px; opacity:0; transition:0.5s;">GAME OPGESLAGEN...</div>
@@ -2003,6 +2013,11 @@ const stopPvpLobbySubscription = () => {
   pvpLobbyUnsubscribe();
   pvpLobbyUnsubscribe = null;
 };
+const stopDuelInviteSubscription = () => {
+  if (!duelInviteUnsubscribe) return;
+  duelInviteUnsubscribe();
+  duelInviteUnsubscribe = null;
+};
 const stopPvpSync = () => {
   stopPvpScorePush();
   stopPvpScoreSubscription();
@@ -2012,6 +2027,8 @@ const stopPvpSync = () => {
   pvpState.endSent = false;
   pvpState.leaderboard = [];
   pvpState.score = 0;
+  pvpState.allowedUids = [];
+  stopDuelInviteSubscription();
 };
 const tryMarkPvpEnded = async () => {
   if (!firebaseDb || !ingelogdeGebruiker || !pvpState.gameId || pvpState.endSent) return;
@@ -2036,11 +2053,13 @@ const getPvpModeById = (modeId) =>
   PVP_MODES.find((m) => m.id === String(modeId || "").toUpperCase()) || PVP_MODES[0];
 const publishPvpScore = async () => {
   if (!firebaseDb || !ingelogdeGebruiker || !pvpState.active || !pvpState.gameId) return;
+  const selfUid = String(ingelogdeGebruiker.uid || "");
+  if (pvpState.allowedUids.length && !pvpState.allowedUids.includes(selfUid)) return;
   try {
     await setDoc(
       getPvpScoreDocRef(pvpState.serverId, ingelogdeGebruiker.uid),
       {
-        uid: String(ingelogdeGebruiker.uid || ""),
+        uid: selfUid,
         displayName: getChatDisplayName(),
         serverId: pvpState.serverId,
         gameId: pvpState.gameId,
@@ -2077,6 +2096,7 @@ const subscribePvpScores = () => {
         if (normalizeServerId(data.serverId) !== pvpState.serverId) return;
         if (String(data.gameId || "") !== pvpState.gameId) return;
         const uid = String(data.uid || docSnap.id);
+        if (pvpState.allowedUids.length && !pvpState.allowedUids.includes(uid)) return;
         const score = Number(data.score);
         if (!uid || !Number.isFinite(score)) return;
         const bestaand = perUid.get(uid);
@@ -2107,6 +2127,18 @@ const applyPvpLobbyData = (data) => {
   const serverId = normalizeServerId(data.serverId || multiplayerServerId);
   const gameId = String(data.gameId || "");
   const endAtMs = Number(data.endsAtMs) || 0;
+  const allowedUids = Array.isArray(data.allowedUids)
+    ? data.allowedUids.map((uid) => String(uid || ""))
+    : [];
+  const selfUid = String(ingelogdeGebruiker?.uid || "");
+  if (mode.id === "DUEL_GRASS" && allowedUids.length && !allowedUids.includes(selfUid)) {
+    pvpState.active = false;
+    pvpState.gameId = "";
+    pvpState.allowedUids = [];
+    stopPvpScorePush();
+    stopPvpScoreSubscription();
+    return;
+  }
   if (!gameId || endAtMs <= Date.now()) {
     pvpState.active = false;
     pvpState.gameId = "";
@@ -2121,6 +2153,7 @@ const applyPvpLobbyData = (data) => {
   pvpState.serverId = serverId;
   pvpState.endAtMs = endAtMs;
   pvpState.hostUid = String(data.hostUid || "");
+  pvpState.allowedUids = allowedUids;
   if (isNewGame) {
     pvpState.endSent = false;
     pvpState.score = 0;
@@ -2142,14 +2175,166 @@ const subscribePvpLobby = () => {
     (err) => console.error("PVP lobby stream fout:", err),
   );
 };
+const markDuelInvite = async (inviteId, status) => {
+  if (!firebaseDb || !inviteId) return;
+  try {
+    await setDoc(
+      getDuelInviteDocRef(inviteId),
+      { status: String(status || "handled"), handledAt: serverTimestamp() },
+      { merge: true },
+    );
+  } catch (err) {
+    console.error("Duel invite status mislukt:", err);
+  }
+};
+const startDuelFromInvite = async (invite) => {
+  if (!firebaseDb || !ingelogdeGebruiker || !invite) return;
+  const selfUid = String(ingelogdeGebruiker.uid || "");
+  const fromUid = String(invite.fromUid || "");
+  if (!selfUid || !fromUid) return;
+  const gameId = `${Date.now()}_DUEL_${selfUid.slice(0, 6)}`;
+  const endAtMs = Date.now() + PVP_DURATION_MS;
+  try {
+    await setDoc(
+      getPvpLobbyDocRef(multiplayerServerId),
+      {
+        serverId: normalizeServerId(multiplayerServerId),
+        gameId,
+        mode: "DUEL_GRASS",
+        status: "running",
+        hostUid: selfUid,
+        allowedUids: [selfUid, fromUid],
+        endsAtMs: endAtMs,
+        speed: PVP_FORCE_SPEED,
+        radius: PVP_FORCE_RADIUS,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (err) {
+    console.error("Duel start mislukt:", err);
+    alert("Kon duel niet starten.");
+  }
+};
+const subscribeDuelInvites = () => {
+  stopDuelInviteSubscription();
+  if (!firebaseDb || !ingelogdeGebruiker) return;
+  const inviteQuery = query(
+    collection(firebaseDb, FIREBASE_DUEL_INVITES_COLLECTION),
+    where("toUid", "==", String(ingelogdeGebruiker.uid || "")),
+    limit(20),
+  );
+  duelInviteUnsubscribe = onSnapshot(
+    inviteQuery,
+    async (snapshot) => {
+      const pending = snapshot.docs
+        .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+        .filter((invite) => String(invite.status || "pending") === "pending")
+        .filter(
+          (invite) =>
+            normalizeServerId(invite.serverId) === normalizeServerId(multiplayerServerId),
+        )
+        .sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0));
+      const invite = pending[0];
+      if (!invite || invite.id === laatsteDuelInviteId) return;
+      laatsteDuelInviteId = invite.id;
+      const fromName = String(invite.fromName || "SPELER");
+      const wil = confirm(`${fromName} nodigt je uit voor een duel (1v1). Accepteren?`);
+      if (!wil) {
+        await markDuelInvite(invite.id, "declined");
+        return;
+      }
+      await markDuelInvite(invite.id, "accepted");
+      await startDuelFromInvite(invite);
+    },
+    (err) => console.error("Duel invite stream fout:", err),
+  );
+};
+window.inviteDuel = async (targetUid, targetName = "SPELER") => {
+  if (!firebaseDb || !ingelogdeGebruiker) {
+    alert("Log in met Google om te duellen.");
+    return;
+  }
+  const toUid = String(targetUid || "");
+  const naam = String(targetName || "").trim() || `SPELER ${toUid.slice(0, 8)}`;
+  const fromUid = String(ingelogdeGebruiker.uid || "");
+  if (!toUid || toUid === fromUid) return;
+  try {
+    await addDoc(collection(firebaseDb, FIREBASE_DUEL_INVITES_COLLECTION), {
+      fromUid,
+      fromName: getChatDisplayName(),
+      toUid,
+      toName: naam.slice(0, 24),
+      serverId: normalizeServerId(multiplayerServerId),
+      status: "pending",
+      createdAt: serverTimestamp(),
+      createdAtMs: Date.now(),
+    });
+    alert(`Duel-uitnodiging verstuurd naar ${naam}.`);
+  } catch (err) {
+    console.error("Duel invite versturen mislukt:", err);
+    alert("Kon duel-uitnodiging niet versturen.");
+  }
+};
+window.openDuelInviteMenu = async () => {
+  if (!firebaseDb || !ingelogdeGebruiker) {
+    alert("Log in met Google om te duellen.");
+    return;
+  }
+  const cutoff = Timestamp.fromMillis(Date.now() - ONLINE_SPELER_WINDOW_MS);
+  const onlineQuery = query(
+    collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
+    where("updatedAt", ">=", cutoff),
+    limit(500),
+  );
+  let spelers = [];
+  try {
+    const snap = await getDocs(onlineQuery);
+    const selfUid = String(ingelogdeGebruiker.uid || "");
+    snap.forEach((docSnap) => {
+      const uid = String(docSnap.id || "");
+      const data = docSnap.data() || {};
+      if (!uid || uid === selfUid) return;
+      if (
+        normalizeServerId(data.multiplayerServerId) !==
+        normalizeServerId(multiplayerServerId)
+      )
+        return;
+      spelers.push({ uid, naam: getLeaderboardDisplayName(data, uid) });
+    });
+  } catch (err) {
+    console.error("Duel spelers laden mislukt:", err);
+  }
+  const lijst = spelers.length
+    ? spelers
+        .slice(0, 25)
+        .map(
+          (speler) =>
+            `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #334155;"><span>${escapeHtml(speler.naam)}</span><button onclick="window.inviteDuel('${speler.uid}')" style="padding:8px 14px; background:#22c55e; color:white; border:none; border-radius:8px; font-family:Impact; cursor:pointer;">NODIG UIT</button></div>`,
+        )
+        .join("")
+    : `<div style="color:#94a3b8;">Geen online spelers gevonden op deze server.</div>`;
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #22c55e; border-radius:30px; text-align:center; min-width:640px; max-width:860px; max-height:85vh; overflow-y:auto;">
+      <h1 style="color:#86efac; font-size:52px; margin-bottom:8px;">DUEL UITNODIGEN</h1>
+      <p style="color:#dcfce7; margin-bottom:14px;">Kies iemand op jouw server voor een 1v1 duel.</p>
+      <div style="background:#0b1220; border:2px solid #14532d; border-radius:12px; padding:12px; text-align:left;">${lijst}</div>
+      <button onclick="window.sluit()" style="margin-top:18px; padding:14px 56px; background:#22c55e; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
+    </div>`;
+};
 const refreshPvpSync = () => {
   stopPvpScorePush();
   stopPvpScoreSubscription();
+  stopDuelInviteSubscription();
   pvpState.active = false;
   pvpState.gameId = "";
   pvpState.score = 0;
   pvpState.leaderboard = [];
+  pvpState.allowedUids = [];
+  laatsteDuelInviteId = "";
   subscribePvpLobby();
+  subscribeDuelInvites();
 };
 window.startPvpMiniGame = async (modeId) => {
   if (!firebaseDb || !ingelogdeGebruiker) {
@@ -2161,6 +2346,10 @@ window.startPvpMiniGame = async (modeId) => {
     return;
   }
   const mode = getPvpModeById(modeId);
+  if (mode.id === "DUEL_GRASS") {
+    alert("Gebruik 'DUEL UITNODIGEN' voor 1v1 duels.");
+    return;
+  }
   const gameId = `${Date.now()}_${String(ingelogdeGebruiker.uid || "").slice(0, 8)}`;
   const endAtMs = Date.now() + PVP_DURATION_MS;
   try {
@@ -2172,6 +2361,7 @@ window.startPvpMiniGame = async (modeId) => {
         mode: mode.id,
         status: "running",
         hostUid: String(ingelogdeGebruiker.uid || ""),
+        allowedUids: [],
         endsAtMs: endAtMs,
         speed: PVP_FORCE_SPEED,
         radius: PVP_FORCE_RADIUS,
@@ -2185,7 +2375,7 @@ window.startPvpMiniGame = async (modeId) => {
   }
 };
 window.openPvpMiniGames = () => {
-  const modeButtons = PVP_MODES.map(
+  const modeButtons = PVP_MODES.filter((mode) => mode.id !== "DUEL_GRASS").map(
     (mode) =>
       `<button onclick="window.startPvpMiniGame('${mode.id}')" style="padding:12px 18px; background:#0ea5e9; color:white; border:2px solid white; border-radius:10px; font-family:Impact; font-size:20px; cursor:pointer;">START ${mode.naam}</button>`,
   ).join("");
@@ -2714,7 +2904,8 @@ window.openEvent = () => {
   overlay.style.pointerEvents = "auto";
   const huidigeMaandNaam = getHuidigeMaandNaam();
   const skinClaimKlaar =
-    eventLevel === 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam);
+    eventLevel === EVENT_SKIN_LEVEL_REQUIREMENT &&
+    !ontgrendeldeSkins.includes(huidigeMaandNaam);
   const v = Math.min(
     window.getStat(eventOpdracht.id) - eventOpdracht.start,
     eventOpdracht.d,
@@ -2723,7 +2914,7 @@ window.openEvent = () => {
         <h1 style="color:#9b59b6; font-size:70px; margin-bottom:5px;"> ${huidigeMaandNaam}</h1>
         <h2 style="color:white; font-size:30px; margin-top:0; opacity:0.8;">EVENT LEVEL ${eventLevel}</h2>
         <p style="font-size:30px; margin-top:20px;">${eventOpdracht.t}</p>
-        <p style="font-size:22px; color:#ddd; margin-top:6px;">SKIN WORDT ONTGRENDELD OP LEVEL 100</p>
+        <p style="font-size:22px; color:#ddd; margin-top:6px;">SKIN WORDT ONTGRENDELD OP LEVEL ${EVENT_SKIN_LEVEL_REQUIREMENT}</p>
         <div style="width:500px; height:40px; background:#333; border:4px solid white; margin:30px auto; border-radius:20px; overflow:hidden;"><div style="width:${(v / eventOpdracht.d) * 100}%; height:100%; background:#9b59b6;"></div></div>
         <button onclick="window.claimEvent()" style="padding:25px 70px; background:${eventRewardKlaar ? "#2ecc71" : "#444"}; font-family:Impact; font-size:32px; color:white; cursor:pointer; border:none; border-radius:20px;">${eventRewardKlaar ? (skinClaimKlaar ? "CLAIM SKIN" : "CLAIM LEVEL") : "VERGRENDELD"}</button>
         <br><button onclick="window.sluit()" style="margin-top:30px; color:gray; background:none; border:none; cursor:pointer; font-size:20px;">SLUITEN</button></div>`;
@@ -2732,11 +2923,14 @@ window.claimEvent = () => {
   window.syncEventMetMaand();
   if (eventRewardKlaar) {
     const huidigeMaandNaam = getHuidigeMaandNaam();
-    if (eventLevel !== 100) {
+    if (eventLevel !== EVENT_SKIN_LEVEL_REQUIREMENT) {
       geld += 1;
       totaalVerdiend += 1;
     }
-    if (eventLevel === 100 && !ontgrendeldeSkins.includes(huidigeMaandNaam))
+    if (
+      eventLevel === EVENT_SKIN_LEVEL_REQUIREMENT &&
+      !ontgrendeldeSkins.includes(huidigeMaandNaam)
+    )
       ontgrendeldeSkins.push(huidigeMaandNaam);
     eventLevel++;
     window.genereerMissie(true);
@@ -3439,6 +3633,8 @@ grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
 mapObstacleGroup = new THREE.Group();
 scene.add(mapObstacleGroup);
+mapDecorGroup = new THREE.Group();
+scene.add(mapDecorGroup);
 
 const grassDummy = new THREE.Object3D();
 const grassData = new Array(totalGrass);
@@ -3496,6 +3692,108 @@ const clearMapObstacles = () => {
     if (!obstacle) continue;
     mapObstacleGroup?.remove(obstacle.mesh);
     disposeObject3D(obstacle.mesh);
+  }
+};
+const clearMapDecor = () => {
+  while (mapDecorObjects.length) {
+    const obj = mapDecorObjects.pop();
+    if (!obj) continue;
+    mapDecorGroup?.remove(obj);
+    disposeObject3D(obj);
+  }
+};
+const makeSeededRandom = (seedBase) => {
+  let seed = Math.max(1, Math.floor(seedBase) % 2147483647);
+  return () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+};
+const createMapDecorMesh = (mapId, size) => {
+  const group = new THREE.Group();
+  if (mapId === "NEON_CITY") {
+    const block = new THREE.Mesh(
+      new THREE.BoxGeometry(size * 1.4, size * 2.8, size * 1.4),
+      new THREE.MeshLambertMaterial({ color: 0x1f2937 }),
+    );
+    block.position.y = size * 1.4;
+    group.add(block);
+    const neon = new THREE.Mesh(
+      new THREE.BoxGeometry(size * 1.45, size * 0.15, size * 1.45),
+      new THREE.MeshBasicMaterial({ color: 0x22d3ee }),
+    );
+    neon.position.y = size * 2.2;
+    group.add(neon);
+    return group;
+  }
+  if (mapId === "VOLCANO") {
+    const rock = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(size * 0.9, 0),
+      new THREE.MeshLambertMaterial({ color: 0x2f2f35 }),
+    );
+    rock.position.y = size * 0.7;
+    group.add(rock);
+    const ember = new THREE.Mesh(
+      new THREE.SphereGeometry(size * 0.16, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff4d2d }),
+    );
+    ember.position.y = size * 1.35;
+    group.add(ember);
+    return group;
+  }
+  if (mapId === "DESERT") {
+    const cactus = new THREE.Mesh(
+      new THREE.CylinderGeometry(size * 0.15, size * 0.22, size * 2.2, 8),
+      new THREE.MeshLambertMaterial({ color: 0x3f7f3d }),
+    );
+    cactus.position.y = size * 1.1;
+    group.add(cactus);
+    return group;
+  }
+  if (mapId === "SNOW") {
+    const ice = new THREE.Mesh(
+      new THREE.OctahedronGeometry(size * 0.85),
+      new THREE.MeshLambertMaterial({ color: 0xdbeafe }),
+    );
+    ice.position.y = size * 0.72;
+    group.add(ice);
+    return group;
+  }
+  const bush = new THREE.Mesh(
+    new THREE.SphereGeometry(size * 0.7, 9, 8),
+    new THREE.MeshLambertMaterial({ color: 0x2f6b2f }),
+  );
+  bush.position.y = size * 0.58;
+  group.add(bush);
+  return group;
+};
+const rebuildMapDecor = () => {
+  clearMapDecor();
+  const map = getMapById(huidigeMapId);
+  const mapHash = [...String(map.id || "CLASSIC")].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  const rand = makeSeededRandom(9103 + mapHash * 13);
+  const count = map.id === "NEON_CITY" ? 48 : map.id === "VOLCANO" ? 44 : 38;
+  let placed = 0;
+  let attempts = 0;
+  while (placed < count && attempts < count * 30) {
+    attempts++;
+    const x = -MAP_HALF_SIZE + rand() * MAP_SIZE;
+    const z = -MAP_HALF_SIZE + rand() * MAP_SIZE;
+    const centerDistSq = x * x + z * z;
+    if (centerDistSq < 90) continue;
+    const overlapObstacle = mapObstacles.some((obs) => {
+      const dx = x - obs.x;
+      const dz = z - obs.z;
+      return dx * dx + dz * dz < (obs.radius + 1.6) * (obs.radius + 1.6);
+    });
+    if (overlapObstacle) continue;
+    const size = 0.8 + rand() * 2.1;
+    const decor = createMapDecorMesh(map.id, size);
+    decor.position.set(x, 0, z);
+    decor.rotation.y = rand() * Math.PI * 2;
+    mapDecorGroup.add(decor);
+    mapDecorObjects.push(decor);
+    placed++;
   }
 };
 const createMapObstacleMesh = (mapId, radius, height, color) => {
@@ -3612,6 +3910,7 @@ const applyMapTheme = () => {
     grassMaterial.color.set(Number(map.grass ?? 0x008000));
   }
   rebuildMapObstacles();
+  rebuildMapDecor();
 };
 window.applyMapTheme = applyMapTheme;
 const solveObstacleCollision = (prevX, prevZ) => {
