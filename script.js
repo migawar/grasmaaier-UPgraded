@@ -3439,14 +3439,16 @@ window.toggleGoogleLogin = async () => {
 };
 
 window.save = async (silent = false) => {
-  const moetLokaalOpslaan = autoSaveOnd || silent;
-  const moetCloudOpslaan = Boolean(ingelogdeGebruiker && firebaseDb);
-  if (!moetLokaalOpslaan && !moetCloudOpslaan) return;
+  // Een periodieke save (van setInterval) mag enkel doorgaan als autoSaveOnd aan staat.
+  // Een 'silent' save (bv. bij uitloggen of server-wissel) moet altijd doorgaan.
+  if (!autoSaveOnd && !silent) {
+    return;
+  }
 
   const data = window.getSaveData();
   localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
 
-  if (moetCloudOpslaan) {
+  if (ingelogdeGebruiker && firebaseDb) {
     try {
       await setDoc(
         getSaveDocRef(ingelogdeGebruiker.uid),
@@ -3463,7 +3465,8 @@ window.save = async (silent = false) => {
     }
   }
 
-  if (autoSaveOnd) {
+  // Toon de toast enkel voor de periodieke auto-save, niet voor de 'stille' saves.
+  if (autoSaveOnd && !silent) {
     const t = document.getElementById("saveToast");
     if (t) {
       t.style.opacity = 1;
