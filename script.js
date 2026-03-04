@@ -304,6 +304,7 @@ let pvpLobbyUnsubscribe = null;
 let pvpScoreUnsubscribe = null;
 let pvpScoreIntervalId = null;
 let duelInviteUnsubscribe = null;
+let laatsteDuelInviteId = "";
 const pvpState = {
   active: false,
   gameId: "",
