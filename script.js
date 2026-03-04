@@ -118,6 +118,7 @@ let miniGameRonde = 1;
 let miniGameKnopZichtbaarTot = 0;
 let basicStateVoorCreative = null;
 let gebruikteRedeemCodes = [];
+let directSaveTimeoutId = null;
 const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 const LOCAL_SAVE_KEY = "grassMasterSaveV2";
 const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
@@ -647,6 +648,7 @@ const SKIN_SPECIAL_EFFECTS = {
 };
 const MOWER_SKIN_TRAIL_MAX_POINTS = 42;
 const MOWER_SKIN_PARTICLE_COUNT = 24;
+const DIRECT_SAVE_DEBOUNCE_MS = 140;
 
 const keys = {};
 let mowerBodyMaterial = null;
@@ -1552,6 +1554,14 @@ window.sluit = () => {
   overlay.style.pointerEvents = "none";
 };
 
+const scheduleDirectSave = () => {
+  if (directSaveTimeoutId) clearTimeout(directSaveTimeoutId);
+  directSaveTimeoutId = setTimeout(() => {
+    directSaveTimeoutId = null;
+    window.save();
+  }, DIRECT_SAVE_DEBOUNCE_MS);
+};
+
 window.updateUI = () => {
   window.syncEventMetMaand();
   const nu = Date.now();
@@ -1669,6 +1679,7 @@ window.updateUI = () => {
   document.getElementById("eventBtn").style.border = eventRewardKlaar
     ? "8px solid #2ecc71"
     : "5px solid white";
+  scheduleDirectSave();
 };
 
 // --- 5. OVERIGE FUNCTIES ---
