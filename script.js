@@ -97,6 +97,7 @@ let rebirtCount = 0;
 let totaalSpeeltijdSec = 0;
 let totaalVerdiendVoorTrofeeen = 0;
 let lichtKleur = "default";
+let huidigeMapId = "CLASSIC";
 let radDraaiCount = 0;
 let radIsSpinning = false;
 let miniGameKnopZichtbaar = false;
@@ -130,8 +131,11 @@ const CHAT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const CHAT_CLEANUP_BATCH_SIZE = 100;
 const ONLINE_SPELER_WINDOW_MS = 45 * 1000;
 const ONLINE_SPELER_REFRESH_MS = 20 * 1000;
-const PRESENCE_HEARTBEAT_MS = 350;
+const PRESENCE_HEARTBEAT_MS = 1200;
 const PRESENCE_STALE_MS = 12 * 1000;
+const PRESENCE_FORCE_SYNC_MS = 4500;
+const PRESENCE_MOVE_EPSILON = 0.2;
+const PRESENCE_ROT_EPSILON = 0.09;
 const MULTIPLAYER_DEFAULT_SERVER = "EU-1";
 const CUSTOM_SERVER_PREFIX = "ROOM-";
 const CUSTOM_SERVER_REGEX = /^ROOM-[A-Z0-9]{4,12}$/;
@@ -148,6 +152,81 @@ const DIAMANT_SKINS_SHOP = [
   { id: "VOID", naam: "VOID", prijs: 800, kleur: "#7c3aed" },
 ];
 const DIAMANT_SKIN_IDS = DIAMANT_SKINS_SHOP.map((skin) => skin.id);
+const MAP_PRESETS = [
+  {
+    id: "CLASSIC",
+    naam: "CLASSIC",
+    sky: 0x222222,
+    ground: 0x2f8a2f,
+    grass: 0x008000,
+    fog: null,
+    obstacleColor: 0x5b6b4f,
+    obstacles: [],
+  },
+  {
+    id: "VOLCANO",
+    naam: "VOLCANO",
+    sky: 0x1a1010,
+    ground: 0x3d2b2b,
+    grass: 0x6a3b3b,
+    fog: { color: 0x2a1818, near: 35, far: 180 },
+    obstacleColor: 0x3f3f46,
+    obstacles: [
+      { x: -18, z: -10, r: 4.5, h: 5.5 },
+      { x: 12, z: -14, r: 3.7, h: 4.6 },
+      { x: 20, z: 8, r: 5.2, h: 6.2 },
+      { x: -8, z: 18, r: 3.9, h: 4.8 },
+    ],
+  },
+  {
+    id: "DESERT",
+    naam: "DESERT",
+    sky: 0xd8b26a,
+    ground: 0xc89b52,
+    grass: 0xb28947,
+    fog: { color: 0xd2b678, near: 50, far: 220 },
+    obstacleColor: 0x8d6b3f,
+    obstacles: [
+      { x: -22, z: 2, r: 3.6, h: 6.6 },
+      { x: 6, z: -20, r: 4.4, h: 4.7 },
+      { x: 24, z: 18, r: 3.4, h: 6.1 },
+      { x: -4, z: 24, r: 3.2, h: 5.8 },
+    ],
+  },
+  {
+    id: "SNOW",
+    naam: "SNOW",
+    sky: 0x9fc4e6,
+    ground: 0xc8d7e6,
+    grass: 0xdce8f3,
+    fog: { color: 0xcad9e8, near: 40, far: 210 },
+    obstacleColor: 0x7f8ea6,
+    obstacles: [
+      { x: -16, z: -16, r: 4, h: 4.5 },
+      { x: 18, z: -6, r: 3.8, h: 5.2 },
+      { x: 4, z: 20, r: 4.8, h: 4.2 },
+      { x: -24, z: 14, r: 3.3, h: 5.7 },
+    ],
+  },
+  {
+    id: "NEON_CITY",
+    naam: "NEON CITY",
+    sky: 0x0b1020,
+    ground: 0x1f2a46,
+    grass: 0x284777,
+    fog: { color: 0x101b33, near: 55, far: 230 },
+    obstacleColor: 0x334155,
+    obstacles: [
+      { x: -12, z: -22, r: 3.5, h: 8.4 },
+      { x: 10, z: -6, r: 3.1, h: 9.2 },
+      { x: 22, z: 15, r: 4.1, h: 7.7 },
+      { x: -20, z: 20, r: 3.6, h: 8.8 },
+    ],
+  },
+];
+const REMOTE_TRAIL_POINT_DISTANCE = 0.55;
+const REMOTE_TRAIL_MAX_POINTS = 64;
+const PLAYER_COLLISION_RADIUS = 0.58;
 const TROFEE_DREMPELS = [
   100,
   1000,
@@ -207,7 +286,18 @@ let customServers = [];
 let presenceUnsubscribe = null;
 let presenceHeartbeatId = null;
 let presenceHeartbeatBusy = false;
+let lastPresenceSnapshot = {
+  initialized: false,
+  x: 0,
+  z: 0,
+  rotationY: 0,
+  skin: "STARTER",
+  serverId: MULTIPLAYER_DEFAULT_SERVER,
+  ts: 0,
+};
 const remotePlayers = new Map();
+const mapObstacles = [];
+let mapObstacleGroup = null;
 
 const maanden = [
   "JANUARI",
@@ -480,6 +570,12 @@ const registerCustomServer = (serverId, opties = {}) => {
   return server;
 };
 customServers = loadCustomServersLocal();
+const normalizeMapId = (rawId) => {
+  const id = String(rawId ?? "").trim().toUpperCase();
+  return MAP_PRESETS.some((map) => map.id === id) ? id : "CLASSIC";
+};
+const getMapById = (mapId) =>
+  MAP_PRESETS.find((map) => map.id === normalizeMapId(mapId)) || MAP_PRESETS[0];
 const normalizeServerId = (rawId) => {
   const id = String(rawId ?? "").trim().toUpperCase();
   if (MULTIPLAYER_SERVERS.some((server) => server.id === id)) return id;
@@ -526,6 +622,11 @@ const disposeRemotePlayer = (remote) => {
     child.material?.dispose?.();
   });
   scene.remove(remote.group);
+  if (remote.trailLine) {
+    scene.remove(remote.trailLine);
+    remote.trailLine.geometry?.dispose?.();
+    remote.trailLine.material?.dispose?.();
+  }
 };
 const clearRemotePlayers = () => {
   remotePlayers.forEach((remote) => disposeRemotePlayer(remote));
@@ -553,7 +654,18 @@ const makeRemotePlayerMesh = () => {
   marker.position.set(0, 1.15, 0);
   marker.rotation.x = Math.PI;
   group.add(marker);
-  return { group, bodyMaterial };
+  const trailLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({
+      color: 0x93c5fd,
+      transparent: true,
+      opacity: 0.85,
+    }),
+  );
+  trailLine.frustumCulled = false;
+  trailLine.renderOrder = 1;
+  scene.add(trailLine);
+  return { group, bodyMaterial, trailLine };
 };
 const setRemotePlayerSkin = (remote, skinNaam) => {
   if (!remote?.bodyMaterial) return;
@@ -561,6 +673,9 @@ const setRemotePlayerSkin = (remote, skinNaam) => {
   remote.bodyMaterial.color.set(basisKleur);
   remote.bodyMaterial.emissive.set(skinNaam === "BLUE" ? 0x12366f : 0x1a1a1a);
   remote.bodyMaterial.shininess = skinNaam === "BLUE" ? 95 : 65;
+  if (remote.trailLine?.material?.color) {
+    remote.trailLine.material.color.set(basisKleur);
+  }
 };
 const upsertRemotePlayer = (uid, data) => {
   let remote = remotePlayers.get(uid);
@@ -572,6 +687,8 @@ const upsertRemotePlayer = (uid, data) => {
       targetPos: new THREE.Vector3(),
       targetRotY: 0,
       lastSeenMs: 0,
+      trailPoints: [],
+      lastTrailPos: new THREE.Vector3(),
     };
     remotePlayers.set(uid, remote);
   }
@@ -582,6 +699,27 @@ const upsertRemotePlayer = (uid, data) => {
   remote.targetRotY = rotY;
   remote.lastSeenMs = Date.now();
   setRemotePlayerSkin(remote, String(data?.skin || "STARTER").toUpperCase());
+};
+const updateRemoteTrail = (remote) => {
+  if (!remote?.trailLine) return;
+  const p = remote.group.position;
+  if (!remote.trailPoints.length) {
+    const start = new THREE.Vector3(p.x, 0.04, p.z);
+    remote.trailPoints.push(start);
+    remote.lastTrailPos.copy(start);
+  } else {
+    const dx = p.x - remote.lastTrailPos.x;
+    const dz = p.z - remote.lastTrailPos.z;
+    if (dx * dx + dz * dz >= REMOTE_TRAIL_POINT_DISTANCE * REMOTE_TRAIL_POINT_DISTANCE) {
+      const next = new THREE.Vector3(p.x, 0.04, p.z);
+      remote.trailPoints.push(next);
+      remote.lastTrailPos.copy(next);
+      if (remote.trailPoints.length > REMOTE_TRAIL_MAX_POINTS) {
+        remote.trailPoints.splice(0, remote.trailPoints.length - REMOTE_TRAIL_MAX_POINTS);
+      }
+    }
+  }
+  remote.trailLine.geometry.setFromPoints(remote.trailPoints);
 };
 const trimStaleRemotePlayers = () => {
   const now = Date.now();
@@ -603,6 +741,7 @@ const updateRemotePlayersVisual = (deltaSec) => {
   for (const remote of remotePlayers.values()) {
     remote.group.position.lerp(remote.targetPos, t);
     remote.group.rotation.y = lerpAngle(remote.group.rotation.y, remote.targetRotY, t);
+    updateRemoteTrail(remote);
   }
 };
 const subscribePresence = () => {
@@ -652,20 +791,32 @@ const subscribePresence = () => {
 };
 const publishPresence = async () => {
   if (!firebaseDb || !ingelogdeGebruiker || presenceHeartbeatBusy) return;
+  if (!shouldPublishPresence()) return;
   presenceHeartbeatBusy = true;
+  const serverId = normalizeServerId(multiplayerServerId);
+  const payload = {
+    multiplayerServerId: serverId,
+    presenceX: mower.position.x,
+    presenceZ: mower.position.z,
+    presenceRotationY: mower.rotation.y,
+    presenceSkin: huidigeSkin,
+    presenceUpdatedAt: serverTimestamp(),
+  };
   try {
     await setDoc(
       getSaveDocRef(ingelogdeGebruiker.uid),
-      {
-        multiplayerServerId: normalizeServerId(multiplayerServerId),
-        presenceX: mower.position.x,
-        presenceZ: mower.position.z,
-        presenceRotationY: mower.rotation.y,
-        presenceSkin: huidigeSkin,
-        presenceUpdatedAt: serverTimestamp(),
-      },
+      payload,
       { merge: true },
     );
+    lastPresenceSnapshot = {
+      initialized: true,
+      x: payload.presenceX,
+      z: payload.presenceZ,
+      rotationY: payload.presenceRotationY,
+      skin: payload.presenceSkin,
+      serverId,
+      ts: Date.now(),
+    };
   } catch (err) {
     console.error("Presence publish mislukt:", err);
   } finally {
@@ -681,6 +832,26 @@ const startPresenceHeartbeat = () => {
 const refreshPresenceSync = () => {
   startPresenceHeartbeat();
   subscribePresence();
+};
+const angleDifference = (a, b) => {
+  const TWO_PI = Math.PI * 2;
+  let d = ((a - b + Math.PI) % TWO_PI) - Math.PI;
+  if (d < -Math.PI) d += TWO_PI;
+  return Math.abs(d);
+};
+const shouldPublishPresence = () => {
+  const now = Date.now();
+  const serverId = normalizeServerId(multiplayerServerId);
+  if (!lastPresenceSnapshot.initialized) return true;
+  if (serverId !== lastPresenceSnapshot.serverId) return true;
+  if (huidigeSkin !== lastPresenceSnapshot.skin) return true;
+  if (now - lastPresenceSnapshot.ts >= PRESENCE_FORCE_SYNC_MS) return true;
+  const dx = mower.position.x - lastPresenceSnapshot.x;
+  const dz = mower.position.z - lastPresenceSnapshot.z;
+  if (dx * dx + dz * dz >= PRESENCE_MOVE_EPSILON * PRESENCE_MOVE_EPSILON) return true;
+  if (angleDifference(mower.rotation.y, lastPresenceSnapshot.rotationY) >= PRESENCE_ROT_EPSILON)
+    return true;
+  return false;
 };
 const getAccountLabel = () => {
   if (!ingelogdeGebruiker) return "NIET INGELOGD";
@@ -989,6 +1160,7 @@ const refreshChatForAuthState = () => {
     stopPresenceHeartbeat();
     stopPresenceSubscription();
     clearRemotePlayers();
+    lastPresenceSnapshot.initialized = false;
     setChatOnlineCount(0);
     setChatStatus("Log in met Google", "#f59e0b");
   }
@@ -1297,6 +1469,7 @@ window.maakBasicSnapshot = () => ({
   shopUpgradePrijs,
   multiplayerServerId,
   customServers: [...customServers],
+  huidigeMapId,
   rebirtCount,
   verdienMultiplier,
   radDraaiCount,
@@ -1348,6 +1521,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   }
   multiplayerServerId = normalizeServerId(snapshot.multiplayerServerId);
   if (CUSTOM_SERVER_REGEX.test(multiplayerServerId)) registerCustomServer(multiplayerServerId);
+  huidigeMapId = normalizeMapId(snapshot.huidigeMapId);
   rebirtCount = Number.isFinite(snapshot.rebirtCount) ? snapshot.rebirtCount : 0;
   shopUpgradeLevel = 0;
   verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
@@ -1627,6 +1801,7 @@ window.selectMultiplayerServer = async (serverId) => {
   if (CUSTOM_SERVER_REGEX.test(multiplayerServerId)) {
     registerCustomServer(multiplayerServerId);
   }
+  lastPresenceSnapshot.initialized = false;
   await window.save(true);
   subscribeChat();
   refreshOnlineSpelers();
@@ -1763,6 +1938,45 @@ window.openMultiplayerServers = async () => {
       <button onclick="window.sluit()" style="margin-top:18px; padding:14px 56px; background:#ef4444; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
     </div>`;
   }
+};
+
+window.selectMap = async (mapId) => {
+  huidigeMapId = normalizeMapId(mapId);
+  window.applyMapTheme();
+  window.updateUI();
+  await window.save(true);
+  window.openMapSelect();
+};
+
+window.openMapSelect = () => {
+  const actieveMap = getMapById(huidigeMapId);
+  const lijstHtml = MAP_PRESETS.map((map) => {
+    const actief = map.id === actieveMap.id;
+    return `<div style="text-align:left; background:#161b22; border:3px solid ${actief ? "#22c55e" : "#374151"}; border-radius:14px; padding:14px; margin:10px 0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:14px;">
+        <div>
+          <div style="font-size:24px; color:#93c5fd;">${escapeHtml(map.naam)}</div>
+          <div style="color:#9ca3af;">Obstakels: ${(map.obstacles || []).length}</div>
+        </div>
+        <button data-map-select="${map.id}" style="padding:12px 22px; border:none; border-radius:10px; font-family:Impact; font-size:20px; cursor:pointer; background:${actief ? "#22c55e" : "#2563eb"}; color:white;">${actief ? "ACTIEF" : "KIES"}</button>
+      </div>
+    </div>`;
+  }).join("");
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #2563eb; border-radius:30px; text-align:center; min-width:680px; max-width:900px; max-height:85vh; overflow-y:auto;">
+    <h1 style="color:#93c5fd; font-size:52px; margin-bottom:8px;">MAPS</h1>
+    <p style="margin-bottom:12px; color:#dbeafe;">Kies een map. Elke map heeft eigen sfeer en obstakels.</p>
+    ${lijstHtml}
+    <button onclick="window.openSettings()" style="margin-top:18px; padding:14px 56px; background:#2563eb; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">TERUG</button>
+  </div>`;
+  overlay.querySelectorAll("[data-map-select]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const gekozen = btn.getAttribute("data-map-select");
+      if (!gekozen) return;
+      window.selectMap(gekozen);
+    });
+  });
 };
 
 window.cleanupMiniGame = () => {
@@ -2266,9 +2480,7 @@ window.toggleAutoSave = () => {
 
 window.toggleLichtKleur = () => {
   lichtKleur = lichtKleur === "hemelsblauw" ? "default" : "hemelsblauw";
-  scene.background = new THREE.Color(
-    lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-  );
+  window.applyMapTheme();
   window.openSettings();
 };
 
@@ -2326,6 +2538,7 @@ window.getSaveData = () => ({
   shopUpgradePrijs,
   multiplayerServerId,
   customServers: [...customServers],
+  huidigeMapId,
   rebirtCount,
   verdienMultiplier,
   totaalSpeeltijdSec,
@@ -2401,6 +2614,7 @@ window.applySaveData = (d) => {
   }
   multiplayerServerId = normalizeServerId(d.multiplayerServerId);
   if (CUSTOM_SERVER_REGEX.test(multiplayerServerId)) registerCustomServer(multiplayerServerId);
+  huidigeMapId = normalizeMapId(d.huidigeMapId);
   rebirtCount = Number.isFinite(d.rebirtCount) ? d.rebirtCount : 0;
   verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
   totaalSpeeltijdSec = Number.isFinite(d.totaalSpeeltijdSec)
@@ -2428,9 +2642,7 @@ window.loadCloudSave = async () => {
     if (!snap.exists()) return false;
     const geladen = window.applySaveData(snap.data());
     if (!geladen) return false;
-    scene.background = new THREE.Color(
-      lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-    );
+    window.applyMapTheme();
     if (!actieveOpdracht) window.genereerMissie(false);
     if (!eventOpdracht) window.genereerMissie(true);
     window.applySkinVisual(huidigeSkin);
@@ -2467,9 +2679,7 @@ window.initFirebase = () => {
         }
         if (backup) {
           window.applySaveData(backup);
-          scene.background = new THREE.Color(
-            lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-          );
+          window.applyMapTheme();
           if (!actieveOpdracht) window.genereerMissie(false);
           if (!eventOpdracht) window.genereerMissie(true);
           window.applySkinVisual(huidigeSkin);
@@ -2588,6 +2798,7 @@ window.openSettings = () => {
   const accountKnopTekst = ingelogdeGebruiker ? "UITLOGGEN" : "INLOGGEN MET GOOGLE";
   const accountKnopKleur = ingelogdeGebruiker ? "#e67e22" : "#4285f4";
   const actieveServer = getServerById(multiplayerServerId);
+  const actieveMap = getMapById(huidigeMapId);
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center; max-width:92vw; max-height:85vh; overflow-y:auto;">
@@ -2597,6 +2808,7 @@ window.openSettings = () => {
         <button onclick="window.toggleOneindigSpeelveld()" style="width:400px; padding:20px; background:${oneindigSpeelveldOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ONEINDIG SPEELVELD: ${oneindigSpeelveldOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
         <button onclick="window.toggleFpsMeter()" style="width:400px; padding:20px; background:${fpsMeterOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FPS METER: ${fpsMeterOnd ? "AAN" : "UIT"}</button><br>
+        <button onclick="window.openMapSelect()" style="width:400px; padding:18px; background:#2563eb; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">MAP: ${actieveMap.naam}</button><br>
         <button onclick="window.openMultiplayerServers()" style="width:400px; padding:18px; background:#8b5cf6; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">SERVERS: ${actieveServer.id}</button><br>
         <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
         <button onclick="window.toggleGoogleLogin()" style="width:400px; padding:18px; background:${accountKnopKleur}; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">${accountKnopTekst}</button><br>
@@ -2950,6 +3162,8 @@ const grassMesh = new THREE.InstancedMesh(
 grassMesh.frustumCulled = false;
 grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
+mapObstacleGroup = new THREE.Group();
+scene.add(mapObstacleGroup);
 
 const grassDummy = new THREE.Object3D();
 const grassData = new Array(totalGrass);
@@ -2988,6 +3202,82 @@ for (let x = 0; x < grassPerSide; x++) {
   }
 }
 grassMesh.instanceMatrix.needsUpdate = true;
+
+const clearMapObstacles = () => {
+  while (mapObstacles.length) {
+    const obstacle = mapObstacles.pop();
+    if (!obstacle) continue;
+    mapObstacleGroup?.remove(obstacle.mesh);
+    obstacle.mesh?.geometry?.dispose?.();
+    obstacle.mesh?.material?.dispose?.();
+  }
+};
+const rebuildMapObstacles = () => {
+  clearMapObstacles();
+  const map = getMapById(huidigeMapId);
+  const obstacleColor = Number(map.obstacleColor ?? 0x4b5563);
+  for (const def of map.obstacles || []) {
+    const radius = Math.max(0.8, Number(def.r) || 1.5);
+    const height = Math.max(1.2, Number(def.h) || 3);
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius * 1.08, height, 16),
+      new THREE.MeshLambertMaterial({ color: obstacleColor }),
+    );
+    mesh.position.set(Number(def.x) || 0, height * 0.5, Number(def.z) || 0);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mapObstacleGroup.add(mesh);
+    mapObstacles.push({
+      x: mesh.position.x,
+      z: mesh.position.z,
+      radius,
+      mesh,
+    });
+  }
+};
+const applyMapTheme = () => {
+  const map = getMapById(huidigeMapId);
+  const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
+  scene.background = new THREE.Color(skyColor);
+  if (map.fog && Number.isFinite(map.fog.near) && Number.isFinite(map.fog.far)) {
+    scene.fog = new THREE.Fog(Number(map.fog.color ?? skyColor), map.fog.near, map.fog.far);
+  } else {
+    scene.fog = null;
+  }
+  if (ground.material?.color) {
+    ground.material.color.set(Number(map.ground ?? GROUND_COLOR));
+  }
+  if (grassMaterial.color) {
+    grassMaterial.color.set(Number(map.grass ?? 0x008000));
+  }
+  rebuildMapObstacles();
+};
+window.applyMapTheme = applyMapTheme;
+const solveObstacleCollision = (prevX, prevZ) => {
+  if (!mapObstacles.length) return;
+  for (const obstacle of mapObstacles) {
+    const minDist = obstacle.radius + PLAYER_COLLISION_RADIUS;
+    let dx = mower.position.x - obstacle.x;
+    let dz = mower.position.z - obstacle.z;
+    let distSq = dx * dx + dz * dz;
+    if (distSq >= minDist * minDist) continue;
+    if (distSq < 0.0001) {
+      dx = mower.position.x - prevX;
+      dz = mower.position.z - prevZ;
+      distSq = dx * dx + dz * dz;
+      if (distSq < 0.0001) {
+        dx = 1;
+        dz = 0;
+        distSq = 1;
+      }
+    }
+    const dist = Math.sqrt(distSq);
+    const nx = dx / dist;
+    const nz = dz / dist;
+    mower.position.x = obstacle.x + nx * minDist;
+    mower.position.z = obstacle.z + nz * minDist;
+  }
+};
 
 const CHAT_BLOKKEER_MOVE_KEYS = [
   "w",
@@ -3179,6 +3469,8 @@ function animate(nowPerf = performance.now()) {
   const rijdtVooruit = Boolean(keys["w"] || keys["z"] || keys["arrowup"]);
   const rijdtAchteruit = Boolean(keys["s"] || keys["arrowdown"]);
   const moveDir = (rijdtVooruit ? 1 : 0) + (rijdtAchteruit ? -1 : 0);
+  const prevPosX = mower.position.x;
+  const prevPosZ = mower.position.z;
   if (moveDir !== 0) {
     const yaw = stuurYaw;
     mower.position.x += Math.sin(yaw) * s * moveDir;
@@ -3189,6 +3481,10 @@ function animate(nowPerf = performance.now()) {
     mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
   }
+  solveObstacleCollision(prevPosX, prevPosZ);
+  const dxMove = mower.position.x - prevPosX;
+  const dzMove = mower.position.z - prevPosZ;
+  const mowerIsMoving = dxMove * dxMove + dzMove * dzMove > 0.0001;
   if (mowerBlueKit && mowerBlueKit.visible && mowerBlueRotors.length) {
     for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25 * frameFactor;
   }
@@ -3200,18 +3496,22 @@ function animate(nowPerf = performance.now()) {
   updateGroundTiles();
   const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
   let matrixUpdateNodig = false;
-  if (isOneindigSpeelveldActief()) {
-    if (CREATIVE_UPDATE_SKIP_FRAMES <= 0) {
-      matrixUpdateNodig = updateCreativeGrass(now, maaierRadiusSq);
-    } else if (creativeUpdateSkipCounter >= CREATIVE_UPDATE_SKIP_FRAMES) {
-      creativeUpdateSkipCounter = 0;
-      matrixUpdateNodig = updateCreativeGrass(now, maaierRadiusSq);
+  if (mowerIsMoving) {
+    if (isOneindigSpeelveldActief()) {
+      if (CREATIVE_UPDATE_SKIP_FRAMES <= 0) {
+        matrixUpdateNodig = updateCreativeGrass(now, maaierRadiusSq);
+      } else if (creativeUpdateSkipCounter >= CREATIVE_UPDATE_SKIP_FRAMES) {
+        creativeUpdateSkipCounter = 0;
+        matrixUpdateNodig = updateCreativeGrass(now, maaierRadiusSq);
+      } else {
+        creativeUpdateSkipCounter++;
+      }
     } else {
-      creativeUpdateSkipCounter++;
+      creativeUpdateSkipCounter = 0;
+      matrixUpdateNodig = cutGrassNearMowerClassic(now, maaierRadiusSq);
     }
   } else {
     creativeUpdateSkipCounter = 0;
-    matrixUpdateNodig = cutGrassNearMowerClassic(now, maaierRadiusSq);
   }
 
   while (regrowQueueHead < regrowQueue.length) {
@@ -3291,7 +3591,5 @@ window.initFirebase();
 setInterval(() => window.save(), 5000);
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
-scene.background = new THREE.Color(
-  lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-);
+window.applyMapTheme();
 animate();
