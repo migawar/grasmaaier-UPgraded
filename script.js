@@ -161,6 +161,13 @@ const DIAMANT_SKINS_SHOP = [
   { id: "VOID", naam: "VOID", prijs: 800, kleur: "#7c3aed" },
 ];
 const DIAMANT_SKIN_IDS = DIAMANT_SKINS_SHOP.map((skin) => skin.id);
+const RAD_SKINS = [
+  { id: "GOLDEN", naam: "GOLDEN", kleur: "#facc15" },
+  { id: "CYBER", naam: "CYBER", kleur: "#00e5ff" },
+  { id: "EMBER", naam: "EMBER", kleur: "#fb7185" },
+  { id: "FROST", naam: "FROST", kleur: "#bfdbfe" },
+];
+const RAD_SKIN_IDS = RAD_SKINS.map((skin) => skin.id);
 const MAP_PRESETS = [
   {
     id: "CLASSIC",
@@ -374,6 +381,10 @@ const alleSkinKleuren = {
   OBSIDIAN: 0x111827,
   NEON: 0x22d3ee,
   VOID: 0x7c3aed,
+  GOLDEN: 0xfacc15,
+  CYBER: 0x00e5ff,
+  EMBER: 0xfb7185,
+  FROST: 0xbfdbfe,
   JANUARI: 0xffffff,
   FEBRUARI: 0xffc0cb,
   MAART: 0xffd700,
@@ -417,6 +428,30 @@ const skinVisualOverrides = {
     emissiveIntensity: 0.62,
     specular: 0xe3d3ff,
     shininess: 135,
+  },
+  GOLDEN: {
+    emissive: 0x7a5b00,
+    emissiveIntensity: 0.4,
+    specular: 0xfff1a8,
+    shininess: 145,
+  },
+  CYBER: {
+    emissive: 0x005f7a,
+    emissiveIntensity: 0.6,
+    specular: 0xd5f8ff,
+    shininess: 130,
+  },
+  EMBER: {
+    emissive: 0x6b1f1f,
+    emissiveIntensity: 0.5,
+    specular: 0xffd4c8,
+    shininess: 120,
+  },
+  FROST: {
+    emissive: 0x2d4666,
+    emissiveIntensity: 0.42,
+    specular: 0xf0f9ff,
+    shininess: 125,
   },
   JANUARI: {
     emissive: 0x6f6f8a,
@@ -2740,6 +2775,9 @@ window.kiesRadBeloning = () => {
   const geldGroot = Math.round(700 * factor);
   const diamantKlein = Math.max(1, Math.floor(1 + factor * 0.35));
   const diamantGroot = Math.max(2, Math.floor(2 + factor * 0.5));
+  const beschikbareRadSkins = RAD_SKINS.filter(
+    (skin) => !ontgrendeldeSkins.includes(skin.id),
+  );
   const pool = [
     {
       weight: 32,
@@ -2790,6 +2828,14 @@ window.kiesRadBeloning = () => {
       text: "Gratis Value Upgrade",
     },
   ];
+  for (const skin of beschikbareRadSkins) {
+    pool.push({
+      weight: 1.35,
+      type: "skin",
+      skinId: skin.id,
+      text: `${skin.naam} SKIN`,
+    });
+  }
   const totaal = pool.reduce((sum, p) => sum + p.weight, 0);
   let roll = Math.random() * totaal;
   for (const item of pool) {
@@ -2814,6 +2860,16 @@ window.pasRadBeloningToe = (beloning) => {
     const fallback = Math.round(250 * window.getRadProgressFactor());
     geld += fallback;
     return `Upgrade was max, dus je kreeg $${fallback.toLocaleString()} geld!`;
+  }
+  if (beloning.type === "skin") {
+    const skinId = String(beloning.skinId || "").toUpperCase();
+    if (!skinId || ontgrendeldeSkins.includes(skinId)) {
+      const fallbackDiamanten = 2;
+      diamanten += fallbackDiamanten;
+      return `Skin al vrijgespeeld, dus je kreeg ${fallbackDiamanten} diamant(en)!`;
+    }
+    ontgrendeldeSkins.push(skinId);
+    return `Nieuwe skin vrijgespeeld: ${skinId}!`;
   }
   return "Geen beloning.";
 };
@@ -2897,7 +2953,7 @@ window.openSkins = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
-  ["STARTER", "RED", "BLUE", ...DIAMANT_SKIN_IDS, ...maanden].forEach((s) => {
+  ["STARTER", "RED", "BLUE", ...DIAMANT_SKIN_IDS, ...RAD_SKIN_IDS, ...maanden].forEach((s) => {
     const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
     h += `<button class="skinSelectBtn" data-skin="${s}" data-unlocked="${ok ? "1" : "0"}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;" ${ok ? "" : "disabled"}>${ok ? s : "LOCKED"}</button>`;
