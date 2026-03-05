@@ -268,6 +268,7 @@ let huidigeSkin = "RED",
 const alleSkinKleuren = {
   RED: 0xff0000,
   BLUE: 0x0000ff,
+  GOLDEN: 0xfacc15,
   JANUARI: 0xffffff,
   FEBRUARI: 0xffc0cb,
   MAART: 0xffd700,
@@ -287,6 +288,12 @@ const skinVisualOverrides = {
     emissiveIntensity: 0.42,
     specular: 0xd6e4ff,
     shininess: 90,
+  },
+  GOLDEN: {
+    emissive: 0x7a5b00,
+    emissiveIntensity: 0.4,
+    specular: 0xfff1a8,
+    shininess: 145,
   },
   JANUARI: {
     emissive: 0x6f6f8a,
@@ -1535,6 +1542,12 @@ window.kiesRadBeloning = () => {
       upgradeType: "w",
       text: "Gratis Value Upgrade",
     },
+    {
+      weight: 1.35,
+      type: "skin",
+      skinId: "GOLDEN",
+      text: "GOLDEN SKIN",
+    },
   ];
   const totaal = pool.reduce((sum, p) => sum + p.weight, 0);
   let roll = Math.random() * totaal;
@@ -1560,6 +1573,16 @@ window.pasRadBeloningToe = (beloning) => {
     const fallback = Math.round(250 * window.getRadProgressFactor());
     geld += fallback;
     return `Upgrade was max, dus je kreeg $${fallback.toLocaleString()} geld!`;
+  }
+  if (beloning.type === "skin") {
+    const skinId = String(beloning.skinId || "").toUpperCase();
+    if (!skinId || ontgrendeldeSkins.includes(skinId)) {
+      const fallbackDiamanten = 2;
+      diamanten += fallbackDiamanten;
+      return `Skin al vrijgespeeld, dus je kreeg ${fallbackDiamanten} diamant(en)!`;
+    }
+    ontgrendeldeSkins.push(skinId);
+    return `Nieuwe skin vrijgespeeld: ${skinId}!`;
   }
   return "Geen beloning.";
 };
@@ -1643,7 +1666,7 @@ window.openSkins = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
-  ["RED", "BLUE", ...maanden].forEach((s) => {
+  ["RED", "BLUE", "GOLDEN", ...maanden].forEach((s) => {
     const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
     h += `<button class="skinSelectBtn" data-skin="${s}" data-unlocked="${ok ? "1" : "0"}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;" ${ok ? "" : "disabled"}>${ok ? s : "LOCKED"}</button>`;
