@@ -105,6 +105,7 @@ let miniGameVolgendeCheckAt = 0;
 let miniGameCooldownTot = 0;
 let miniGameTimer = null;
 let miniGameActief = false;
+let miniGameAutoTriggerQueued = false;
 let miniGameMarkerPos = 0;
 let miniGameMarkerRichting = 1;
 const MINIGAME_CHECK_INTERVAL_MS = 9000;
@@ -120,6 +121,7 @@ let basicStateVoorCreative = null;
 let gebruikteRedeemCodes = [];
 const CREATIVE_BACKUP_KEY = "grassMasterCreativeBackupV1";
 const LOCAL_SAVE_KEY = "grassMasterSaveV2";
+const LOCAL_SAVE_BACKUP_KEY = "grassMasterSaveBackupV1";
 const PRELOGIN_BACKUP_KEY = "grassMasterPreLoginSaveV1";
 const FIREBASE_SAVE_COLLECTION = "saves";
 const FIREBASE_CHAT_COLLECTION = "global_chat";
@@ -195,14 +197,6 @@ const MAP_PRESETS = [
     grass: 0x284777,
     fog: { color: 0x101b33, near: 55, far: 230 },
   },
-  {
-    id: "HELL",
-    naam: "HELL",
-    sky: 0x2b0505,
-    ground: 0x1a0505,
-    grass: 0x4a0a0a,
-    fog: { color: 0x2b0505, near: 15, far: 100 },
-  },
 ];
 const DIAMANT_SKINS_SHOP = [
   { id: "OBSIDIAN", naam: "OBSIDIAN", prijs: 15, kleur: "#111827" },
@@ -269,6 +263,7 @@ const getHuidigeEventMaandKey = () => {
 };
 let eventMaandKey = getHuidigeEventMaandKey();
 let spelerResetMaandKey = getHuidigeEventMaandKey();
+let laatsteSaveAtMs = 0;
 
 let gpLevel = 1,
   eventLevel = 1;
@@ -478,7 +473,6 @@ let mowerBlueRotors = [];
 let mowerBlueAuraLight = null;
 let mowerSkinAuraLight = null;
 let mowerSkinRing = null;
-let mowerCannon = null;
 let mowerSkinRingMaterial = null;
 let mowerSkinTrailLine = null;
 let skinFxPulse = 0;
@@ -720,7 +714,7 @@ const subscribeChat = () => {
     },
   );
 };
-window.sendChatMessage = async (customText = null) => {
+window.sendChatMessage = async () => {
   if (!firebaseDb) {
     setChatStatus("Firebase niet klaar", "#f87171");
     return;
@@ -729,7 +723,7 @@ window.sendChatMessage = async (customText = null) => {
     setChatStatus("Log in om te chatten", "#f59e0b");
     return;
   }
-  const raw = customText ?? (chatInputEl?.value ?? "");
+  const raw = chatInputEl?.value ?? "";
   const text = raw.trim();
   if (!text) return;
   const safeText = text.slice(0, CHAT_MAX_BERICHT_LENGTE);
@@ -740,7 +734,7 @@ window.sendChatMessage = async (customText = null) => {
       uid: String(ingelogdeGebruiker.uid || ""),
       createdAt: serverTimestamp(),
     });
-    if (!customText && chatInputEl) chatInputEl.value = "";
+    chatInputEl.value = "";
     setChatStatus("Verzonden", "#22c55e");
   } catch (err) {
     console.error("Bericht verzenden mislukt:", err);
@@ -860,11 +854,6 @@ overlay.style.cssText =
   "position:fixed; top:0; left:-100%; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:10000; transition:0.3s; display:flex; align-items:center; justify-content:center; pointer-events:none; color:white; font-family:Impact;";
 document.body.appendChild(overlay);
 
-const damageOverlay = document.createElement("div");
-damageOverlay.style.cssText =
-  "position:fixed; top:0; left:0; width:100%; height:100%; background:red; opacity:0; pointer-events:none; z-index:9998; transition:opacity 0.1s;";
-document.body.appendChild(damageOverlay);
-
 // Vergroot de klikzone van alle knoppen zonder visuele layout-wijziging.
 const globalButtonHitboxStyle = document.createElement("style");
 globalButtonHitboxStyle.textContent = `
@@ -900,7 +889,6 @@ document.addEventListener(
 
 ui.innerHTML = `
     <div id="geldDisp" style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.8); padding:15px 30px; border-radius:15px; border:4px solid #2ecc71; pointer-events:auto; color:#2ecc71; font-size:45px;">$ 0.00</div>
-    <div id="hellHud" style="position:absolute; top:120px; left:20px; background:rgba(100,0,0,0.8); padding:10px 20px; border-radius:12px; border:4px solid #ff4444; color:#ffdddd; font-size:28px; display:none;">KILLS: 0 / 10</div>
     <div id="diamantDisp" style="position:absolute; top:145px; right:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #5dade2; pointer-events:auto; color:#85c1e9; font-size:30px; text-align:right;">DIAMANTEN: 0</div>
     <div id="trofeeDisp" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:10px 25px; border-radius:15px; border:4px solid #f1c40f; pointer-events:auto; text-align:right;"></div>
     <div id="miniGameSlot" style="position:absolute; top:300px; right:20px; pointer-events:auto;"></div>
@@ -938,18 +926,6 @@ window.updateUI = () => {
   setDisplay("gpBtn", !isCreative);
   setDisplay("rightPanel", !isCreative, "flex");
   setDisplay("fpsDisp", fpsMeterOnd);
-
-  const hellHudEl = document.getElementById("hellHud");
-  if (huidigeMapId === "HELL" && !isCreative) {
-    if (hellHudEl) {
-      hellHudEl.style.display = "block";
-      hellHudEl.innerHTML = `KILLS: ${hellKills} / 10`;
-    }
-  } else {
-    if (hellHudEl) {
-      hellHudEl.style.display = "none";
-    }
-  }
 
   if (isCreative) {
     miniGameKnopZichtbaar = false;
@@ -1055,11 +1031,6 @@ window.setCreativeSpeed = (value) => {
   creativeSpeed = Number(value);
   const el = document.getElementById("creativeSpeedVal");
   if (el) el.innerText = creativeSpeed.toFixed(2);
-};
-
-window.triggerDamageFlash = () => {
-  damageOverlay.style.opacity = "0.4";
-  setTimeout(() => (damageOverlay.style.opacity = "0"), 150);
 };
 
 window.applySkinVisual = (skinNaam) => {
@@ -1458,6 +1429,7 @@ window.cleanupMiniGame = () => {
     miniGameTimer = null;
   }
   miniGameActief = false;
+  miniGameAutoTriggerQueued = false;
 };
 
 window.openMiniGame = () => {
@@ -1469,6 +1441,7 @@ window.openMiniGame = () => {
   miniGameKnopZichtbaarTot = 0;
   window.cleanupMiniGame();
   miniGameActief = true;
+  miniGameAutoTriggerQueued = false;
   miniGameRonde = 1;
   miniGameMarkerPos = 0;
   miniGameMarkerRichting = 1;
@@ -1479,6 +1452,12 @@ window.openMiniGame = () => {
     const marker = document.getElementById("miniGameMarker");
     if (!marker) {
       window.cleanupMiniGame();
+      return;
+    }
+    if (keys["o"] || miniGameAutoTriggerQueued) {
+      miniGameAutoTriggerQueued = false;
+      miniGameMarkerPos = 50;
+      window.stopMiniGame();
       return;
     }
     miniGameMarkerPos += miniGameMarkerRichting * 1.9;
@@ -2033,7 +2012,7 @@ window.getSaveData = () => ({
   creativeSpeed,
   fpsMeterOnd,
   oneindigSpeelveldOnd,
-  hellCooldownTot,
+  laatsteSaveAtMs,
   gebruikteRedeemCodes: [...gebruikteRedeemCodes],
 });
 
@@ -2104,7 +2083,7 @@ window.applySaveData = (d) => {
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   fpsMeterOnd = Boolean(d.fpsMeterOnd);
   oneindigSpeelveldOnd = Boolean(d.oneindigSpeelveldOnd);
-  hellCooldownTot = Number.isFinite(d.hellCooldownTot) ? d.hellCooldownTot : 0;
+  laatsteSaveAtMs = Number.isFinite(d.laatsteSaveAtMs) ? d.laatsteSaveAtMs : 0;
   gebruikteRedeemCodes = Array.isArray(d.gebruikteRedeemCodes)
     ? d.gebruikteRedeemCodes
         .map((code) => String(code).trim().toUpperCase())
@@ -2144,8 +2123,23 @@ window.initFirebase = () => {
       const vorigeGebruiker = ingelogdeGebruiker;
       ingelogdeGebruiker = user || null;
       if (ingelogdeGebruiker) {
+        const lokaleSaveVoorCloud = window.getSaveData();
+        const lokaleSaveAt = Number(laatsteSaveAtMs) || 0;
         const cloudGeladen = await window.loadCloudSave();
-        if (!cloudGeladen) await window.save(true);
+        if (!cloudGeladen) {
+          await window.save(true);
+        } else {
+          const cloudSaveAt = Number(laatsteSaveAtMs) || 0;
+          if (lokaleSaveAt > cloudSaveAt) {
+            window.applySaveData(lokaleSaveVoorCloud);
+            window.applyMapTheme();
+            if (!actieveOpdracht) window.genereerMissie(false);
+            if (!eventOpdracht) window.genereerMissie(true);
+            window.applySkinVisual(huidigeSkin);
+            window.updateUI();
+            await window.save(true);
+          }
+        }
       } else if (vorigeGebruiker) {
         let backup = localStateVoorLogin;
         if (!backup) {
@@ -2203,8 +2197,15 @@ window.save = async (silent = false) => {
   const moetCloudOpslaan = Boolean(ingelogdeGebruiker && firebaseDb);
   if (!moetLokaalOpslaan && !moetCloudOpslaan) return;
 
+  laatsteSaveAtMs = Date.now();
   const data = window.getSaveData();
-  localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
+  try {
+    const payload = JSON.stringify(data);
+    localStorage.setItem(LOCAL_SAVE_KEY, payload);
+    localStorage.setItem(LOCAL_SAVE_BACKUP_KEY, payload);
+  } catch (err) {
+    console.error("Lokale save mislukt:", err);
+  }
 
   if (moetCloudOpslaan) {
     try {
@@ -2233,17 +2234,20 @@ window.save = async (silent = false) => {
 };
 
 window.load = () => {
-  const saved = localStorage.getItem(LOCAL_SAVE_KEY);
-  if (!saved) return false;
-  try {
-    return window.applySaveData(JSON.parse(saved));
-  } catch {
-    return false;
+  const candidates = [LOCAL_SAVE_KEY, LOCAL_SAVE_BACKUP_KEY];
+  for (const key of candidates) {
+    const saved = localStorage.getItem(key);
+    if (!saved) continue;
+    try {
+      if (window.applySaveData(JSON.parse(saved))) return true;
+    } catch {}
   }
+  return false;
 };
 
 window.finalReset = async () => {
   localStorage.removeItem(LOCAL_SAVE_KEY);
+  localStorage.removeItem(LOCAL_SAVE_BACKUP_KEY);
   localStorage.removeItem(CREATIVE_BACKUP_KEY);
   if (firebaseDb && ingelogdeGebruiker) {
     try {
@@ -2290,12 +2294,6 @@ window.openSettings = () => {
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
 window.selectMap = async (mapId) => {
-  if (mapId === "HELL" && Date.now() < hellCooldownTot) {
-    const resterendeMs = hellCooldownTot - Date.now();
-    const resterendeMinuten = Math.ceil(resterendeMs / 60000);
-    alert(`De hel is nog ${resterendeMinuten} minuten gesloten.`);
-    return;
-  }
   huidigeMapId = normalizeMapId(mapId);
   window.applyMapTheme();
   window.updateUI();
@@ -2742,17 +2740,6 @@ mowerBlueKit.rotation.y = Math.PI;
 mowerBlueKit.visible = false;
 mowerDetailedModel.add(mowerBlueKit);
 
-mowerCannon = new THREE.Group();
-const cannonBase = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.3, 16), new THREE.MeshLambertMaterial({color: 0x111111}));
-const cannonBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.2, 16), new THREE.MeshLambertMaterial({color: 0x222222}));
-cannonBarrel.rotation.x = Math.PI / 2;
-cannonBarrel.position.set(0, 0.15, 0.4);
-mowerCannon.add(cannonBase);
-mowerCannon.add(cannonBarrel);
-mowerCannon.position.set(0, 1.1, 0);
-mowerCannon.visible = false;
-mower.add(mowerCannon);
-
 mower.add(mowerDetailedModel);
 
 mowerBlueAuraLight = new THREE.PointLight(0x4aa3ff, 1.1, 8.5, 2);
@@ -2871,129 +2858,6 @@ grassMesh.frustumCulled = false;
 grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
 
-const themeObjectsGroup = new THREE.Group();
-scene.add(themeObjectsGroup);
-const activeThemeEntities = [];
-const activeProjectiles = [];
-let cannonYaw = 0;
-let lastShotTime = 0;
-let playerHealth = 100;
-let hellKills = 0;
-let hellCooldownTot = 0;
-
-function createHellCar() {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 2.2), new THREE.MeshLambertMaterial({color: 0x550000}));
-  body.position.y = 0.35;
-  const eyes = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 0.1), new THREE.MeshBasicMaterial({color: 0xff0000}));
-  eyes.position.set(0, 0.5, 1.1);
-  g.add(body); g.add(eyes);
-  return g;
-}
-function createCactus() {
-  const g = new THREE.Group();
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.8, 8), new THREE.MeshLambertMaterial({color: 0x2e8b57}));
-  m.position.y = 0.9;
-  g.add(m);
-  return g;
-}
-function createSnowman() {
-  const g = new THREE.Group();
-  const b = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), new THREE.MeshLambertMaterial({color: 0xffffff}));
-  b.position.y = 0.5;
-  const t = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), new THREE.MeshLambertMaterial({color: 0xffffff}));
-  t.position.y = 1.2;
-  g.add(b); g.add(t);
-  return g;
-}
-function createNeonPillar() {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2.5, 0.4), new THREE.MeshBasicMaterial({color: 0x00ffff}));
-  m.position.y = 1.25;
-  return m;
-}
-function createRock() {
-  const m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7), new THREE.MeshLambertMaterial({color: 0x444444}));
-  m.position.y = 0.5;
-  return m;
-}
-
-function spawnSingleHellcar() {
-  const car = createHellCar();
-  const angle = Math.random() * Math.PI * 2;
-  const dist = 35 + Math.random() * 30;
-  car.position.set(
-    mower.position.x + Math.sin(angle) * dist,
-    0,
-    mower.position.z + Math.cos(angle) * dist,
-  );
-  themeObjectsGroup.add(car);
-  activeThemeEntities.push({ mesh: car, type: 'hellcar', speed: 2.8 + Math.random() * 1.5 });
-}
-
-function exitHell(reasonMessage) {
-  huidigeMapId = "CLASSIC";
-  hellCooldownTot = Date.now() + 5 * 60 * 1000; // 5 minuten
-  window.applyMapTheme();
-  window.save(true);
-  alert(reasonMessage);
-}
-
-window.spawnThemeObjects = () => {
-  while(themeObjectsGroup.children.length > 0) themeObjectsGroup.remove(themeObjectsGroup.children[0]);
-  activeThemeEntities.length = 0;
-  activeProjectiles.length = 0;
-  mowerCannon.visible = false;
-
-  if (huidigeMapId === "CLASSIC") return;
-
-  if (huidigeMapId === "HELL") {
-    playerHealth = 100;
-    hellKills = 0;
-    mowerCannon.visible = true;
-    for(let i=0; i<12; i++) {
-      const car = createHellCar();
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 25 + Math.random() * 40;
-      car.position.set(Math.sin(angle)*dist, 0, Math.cos(angle)*dist);
-      themeObjectsGroup.add(car);
-      activeThemeEntities.push({ mesh: car, type: 'hellcar', speed: 2.8 + Math.random() * 1.5 });
-    }
-    return;
-  }
-
-  const count = 30;
-  for(let i=0; i<count; i++) {
-    let obj = null;
-    if (huidigeMapId === "DESERT") obj = createCactus();
-    else if (huidigeMapId === "SNOW") obj = createSnowman();
-    else if (huidigeMapId === "NEON_CITY") obj = createNeonPillar();
-    else if (huidigeMapId === "VOLCANO") obj = createRock();
-    
-    if(obj) {
-      obj.position.set((Math.random()-0.5)*130, 0, (Math.random()-0.5)*130);
-      themeObjectsGroup.add(obj);
-    }
-  }
-};
-
-window.shootCannon = () => {
-  const pGeo = new THREE.SphereGeometry(0.25, 8, 8);
-  const pMat = new THREE.MeshBasicMaterial({color: 0xffaa00});
-  const mesh = new THREE.Mesh(pGeo, pMat);
-  
-  const worldPos = new THREE.Vector3();
-  mowerCannon.getWorldPosition(worldPos);
-  worldPos.y += 0.2;
-  mesh.position.copy(worldPos);
-
-  const quat = new THREE.Quaternion();
-  mowerCannon.getWorldQuaternion(quat);
-  const v = new THREE.Vector3(0, 0, 1).applyQuaternion(quat).normalize().multiplyScalar(20);
-  
-  themeObjectsGroup.add(mesh);
-  activeProjectiles.push({ mesh: mesh, velocity: v, life: 2.5 });
-};
-
 const applyMapTheme = () => {
   const map = getMapById(huidigeMapId);
   const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
@@ -3009,7 +2873,6 @@ const applyMapTheme = () => {
   if (grassMaterial.color) {
     grassMaterial.color.set(Number(map.grass ?? 0x008000));
   }
-  window.spawnThemeObjects();
 };
 window.applyMapTheme = applyMapTheme;
 
@@ -3071,6 +2934,9 @@ const clearMovementKeys = () => {
 };
 window.onkeydown = (e) => {
   const key = e.key.toLowerCase();
+  if (key === "o" && miniGameActief) {
+    miniGameAutoTriggerQueued = true;
+  }
   if (isChatInputGefocust() && CHAT_BLOKKEER_MOVE_KEYS.includes(key)) {
     keys[key] = false;
     return;
@@ -3262,75 +3128,6 @@ function animate(nowPerf = performance.now()) {
   frameAccumulatorMs %= FRAME_INTERVAL_MS;
 
   const deltaSec = FRAME_INTERVAL_MS / 1000;
-
-  // Theme Logic (Hellcars & Cannon)
-  if (huidigeMapId === "HELL") {
-    if (keys['l']) cannonYaw += 2.5 * deltaSec;
-    if (keys['m']) cannonYaw -= 2.5 * deltaSec;
-    if (mowerCannon) mowerCannon.rotation.y = cannonYaw;
-    if (keys['p'] && Date.now() - lastShotTime > 500) {
-      window.shootCannon();
-      lastShotTime = Date.now();
-    }
-    // Update Hellcars
-    const target = mower.position;
-    for (let i = activeThemeEntities.length - 1; i >= 0; i--) {
-      const ent = activeThemeEntities[i];
-      if (ent.type === 'hellcar') {
-        const distanceToPlayer = ent.mesh.position.distanceTo(target);
-        if (distanceToPlayer < 1.8) {
-          geld = Math.max(0, geld - 100);
-          uiDirty = true;
-          window.triggerDamageFlash();
-          playerHealth -= 20;
-
-          themeObjectsGroup.remove(ent.mesh);
-          activeThemeEntities.splice(i, 1);
-          if (playerHealth <= 0) {
-            exitHell("Je bent bezweken in de HEL! Terug naar CLASSIC. De hel is voor 5 minuten gesloten.");
-            const naam = getChatDisplayName();
-            window.sendChatMessage(`${naam} is verloren in HELL`);
-          } else {
-            spawnSingleHellcar();
-          }
-          continue; // Ga naar de volgende entiteit
-        }
-
-        const dir = new THREE.Vector3().subVectors(target, ent.mesh.position).normalize();
-        ent.mesh.position.addScaledVector(dir, ent.speed * deltaSec);
-        ent.mesh.lookAt(target);
-      }
-    }
-    // Update Projectiles
-    for (let i = activeProjectiles.length - 1; i >= 0; i--) {
-      const p = activeProjectiles[i];
-      p.mesh.position.addScaledVector(p.velocity, deltaSec);
-      p.life -= deltaSec;
-      let hit = false;
-      for (let j = activeThemeEntities.length - 1; j >= 0; j--) {
-        const ent = activeThemeEntities[j];
-        if (ent.type === 'hellcar' && p.mesh.position.distanceTo(ent.mesh.position) < 2.0) {
-          themeObjectsGroup.remove(ent.mesh);
-          activeThemeEntities.splice(j, 1);
-          hellKills++;
-          uiDirty = true;
-          if (hellKills >= 10) {
-            diamanten++;
-            exitHell("10 kills! Je hebt 1 diamant verdiend en ontsnapt uit de hel. De hel is voor 5 minuten gesloten.");
-          } else {
-            spawnSingleHellcar();
-          }
-          hit = true;
-          break;
-        }
-      }
-      if (hit || p.life <= 0) {
-        themeObjectsGroup.remove(p.mesh);
-        activeProjectiles.splice(i, 1);
-      }
-    }
-  }
-
   const frameFactor = Math.min(3, deltaSec * 60);
   let s = (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
   const turnSpeed = BASE_TURN_SPEED * frameFactor;
@@ -3463,7 +3260,7 @@ if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
 window.initFirebase();
 
-setInterval(() => window.save(), 5000);
+setInterval(() => window.save(true), 5000);
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
 window.applyMapTheme();
