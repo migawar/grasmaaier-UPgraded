@@ -3224,7 +3224,7 @@ if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
 window.initFirebase();
 
-setInterval(() => window.save(), 5000);
+setInterval(() => window.save(true), 5000);
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
 window.applyMapTheme();
