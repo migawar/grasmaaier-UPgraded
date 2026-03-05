@@ -28,10 +28,6 @@ import {
 // --- 1. ENGINE SETUP ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x222222);
-const hellCarGroup = new THREE.Group();
-const obstacleGroup = new THREE.Group();
-const decorGroup = new THREE.Group();
-scene.add(hellCarGroup, obstacleGroup, decorGroup);
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
@@ -111,14 +107,6 @@ let miniGameTimer = null;
 let miniGameActief = false;
 let miniGameMarkerPos = 0;
 let miniGameMarkerRichting = 1;
-let hellCarSpawnTimer = null;
-const hellCars = [];
-let currentMapHalfSize = 70;
-const HELLCAR_COUNT = 10;
-const HELLCAR_CHASE_SPEED = 0.8;
-const HELLCAR_WANDER_SPEED = 0.3;
-const HELLCAR_DETECTION_RADIUS_SQ = 40 * 40;
-const HELLCAR_TURN_LERP_BASE = 0.02;
 const MINIGAME_CHECK_INTERVAL_MS = 15000;
 const MINIGAME_KANS = 0.18;
 const MINIGAME_COOLDOWN_MS = 45000;
@@ -174,14 +162,6 @@ const MAP_PRESETS = [
     ground: 0x2f8a2f,
     grass: 0x008000,
     fog: null,
-  },
-  {
-    id: "HELL",
-    naam: "HELL",
-    sky: 0x100000,
-    ground: 0x331111,
-    grass: 0x552222,
-    fog: { color: 0x220000, near: 20, far: 150 },
   },
   {
     id: "VOLCANO",
@@ -282,10 +262,11 @@ let actieveOpdracht = null,
   eventOpdracht = null;
 let rewardKlaar = false,
   eventRewardKlaar = false;
-let huidigeSkin = "RED",
-  ontgrendeldeSkins = ["RED"];
+let huidigeSkin = "STARTER",
+  ontgrendeldeSkins = ["STARTER"];
 
 const alleSkinKleuren = {
+  STARTER: 0x34d399,
   RED: 0xff0000,
   BLUE: 0x0000ff,
   GOLDEN: 0xfacc15,
@@ -303,6 +284,12 @@ const alleSkinKleuren = {
   DECEMBER: 0x8b0000,
 };
 const skinVisualOverrides = {
+  STARTER: {
+    emissive: 0x0f3f33,
+    emissiveIntensity: 0.28,
+    specular: 0xd1fae5,
+    shininess: 85,
+  },
   BLUE: {
     emissive: 0x0f2f8f,
     emissiveIntensity: 0.42,
@@ -394,6 +381,7 @@ const keys = {};
 let mowerBodyMaterial = null;
 let mowerDetailedModel = null;
 let mowerRedBlock = null;
+let mowerStarterKit = null;
 let mowerBlueKit = null;
 let mowerBlueRotors = [];
 let mowerBlueAuraLight = null;
@@ -444,7 +432,7 @@ const getVrijgespeeldeTrofeeen = () => {
 const getTrofeeBeloning = (trofeeLevel) =>
   TROFEE_BELONINGEN[Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))];
 const isOneindigSpeelveldActief = () =>
-  gameMode === "creative" || oneindigSpeelveldOnd || huidigeMapId === "HELL";
+  gameMode === "creative" || oneindigSpeelveldOnd;
 const getChatDisplayName = () => {
   if (ingelogdeGebruiker?.displayName?.trim()) {
     return ingelogdeGebruiker.displayName.trim().slice(0, 24);
@@ -954,9 +942,10 @@ window.setCreativeSpeed = (value) => {
 window.applySkinVisual = (skinNaam) => {
   if (!mowerBodyMaterial) return;
   const basisKleur = alleSkinKleuren[skinNaam] ?? 0xff0000;
+  const isStarter = skinNaam === "STARTER";
   const isRed = skinNaam === "RED";
   const isBlue = skinNaam === "BLUE";
-  const isOmgekeerd = !isRed && !isBlue;
+  const isOmgekeerd = !isStarter && !isRed && !isBlue;
   const override = skinVisualOverrides[skinNaam] || {};
 
   const color = override.color ?? basisKleur;
@@ -973,6 +962,10 @@ window.applySkinVisual = (skinNaam) => {
   if (mowerDetailedModel) {
     mowerDetailedModel.visible = !isRed;
     mowerDetailedModel.rotation.y = isOmgekeerd ? Math.PI : 0;
+  }
+  if (mowerStarterKit) {
+    mowerStarterKit.visible = isStarter;
+    mowerStarterKit.rotation.y = isStarter ? 0 : Math.PI;
   }
   if (mowerBlueKit) {
     mowerBlueKit.visible = isBlue;
@@ -1431,7 +1424,7 @@ window.openShop = () => {
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
   const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(2);
   const radKost = window.getRadKost();
-  overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px; max-height:85vh; overflow-y:auto;">
+  overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px;">
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
         <p style="font-size:24px; margin:8px 0; color:#2ecc71;">Geld: $${geld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         <p style="font-size:26px; margin:10px 0 25px 0;">Diamanten: <span style="color:#85c1e9;">${diamanten}</span></p>
@@ -1686,7 +1679,7 @@ window.openSkins = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
-  ["RED", "BLUE", "GOLDEN", ...maanden].forEach((s) => {
+  ["STARTER", "RED", "BLUE", "GOLDEN", ...maanden].forEach((s) => {
     const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
     h += `<button class="skinSelectBtn" data-skin="${s}" data-unlocked="${ok ? "1" : "0"}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;" ${ok ? "" : "disabled"}>${ok ? s : "LOCKED"}</button>`;
@@ -1879,12 +1872,12 @@ window.applySaveData = (d) => {
   grasWaarde = BASE_GRASS_VALUE + countWaarde * VALUE_UPGRADE_STEP;
   gpLevel = Number.isFinite(d.gpLevel) ? d.gpLevel : 1;
   eventLevel = Number.isFinite(d.eventLevel) ? d.eventLevel : 1;
-  huidigeSkin = d.huidigeSkin || "RED";
+  huidigeSkin = d.huidigeSkin || "STARTER";
   ontgrendeldeSkins = Array.isArray(d.ontgrendeldeSkins)
     ? [...new Set(d.ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()))]
-    : ["RED"];
-  if (!ontgrendeldeSkins.includes("RED")) ontgrendeldeSkins.unshift("RED");
-  if (!ontgrendeldeSkins.includes(huidigeSkin)) huidigeSkin = "RED";
+    : ["STARTER"];
+  if (!ontgrendeldeSkins.includes("STARTER")) ontgrendeldeSkins.unshift("STARTER");
+  if (!ontgrendeldeSkins.includes(huidigeSkin)) huidigeSkin = "STARTER";
   eventMaandKey =
     typeof d.eventMaandKey === "string" && /^\d{4}-\d{2}$/.test(d.eventMaandKey)
       ? d.eventMaandKey
@@ -2085,7 +2078,7 @@ window.openSettings = () => {
   const actieveMap = getMapById(huidigeMapId);
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:40px; border:8px solid white; border-radius:30px; text-align:center; max-height:85vh; overflow-y:auto;">
+  overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
         <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
@@ -2099,14 +2092,12 @@ window.openSettings = () => {
         <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;"> RESET GAME </button><br>
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
-window.selectMap = async (mapId, options = {}) => {
+window.selectMap = async (mapId) => {
   huidigeMapId = normalizeMapId(mapId);
   window.applyMapTheme();
   window.updateUI();
   await window.save(true);
-  if (options.openUi !== false) {
-    window.openMapSelect();
-  }
+  window.openMapSelect();
 };
 
 window.openMapSelect = () => {
@@ -2251,6 +2242,67 @@ for (const [x, y, z] of wheelOffsets) {
   wheel.position.set(x, y, z);
   mowerDetailedModel.add(wheel);
 }
+
+mowerStarterKit = new THREE.Group();
+const starterPaintMaterial = new THREE.MeshPhongMaterial({
+  color: 0x34d399,
+  emissive: 0x0f3f33,
+  emissiveIntensity: 0.3,
+  specular: 0xd1fae5,
+  shininess: 85,
+});
+const starterDarkMaterial = new THREE.MeshPhongMaterial({
+  color: 0x1f2937,
+  specular: 0xb8c2cf,
+  shininess: 70,
+});
+const starterLightMaterial = new THREE.MeshBasicMaterial({ color: 0x99f6e4 });
+
+const starterFrontBumper = new THREE.Mesh(
+  new THREE.BoxGeometry(1.22, 0.14, 0.22),
+  starterDarkMaterial,
+);
+starterFrontBumper.position.set(0, 0.27, 1.36);
+mowerStarterKit.add(starterFrontBumper);
+
+const starterNose = new THREE.Mesh(
+  new THREE.BoxGeometry(1.02, 0.12, 0.28),
+  starterPaintMaterial,
+);
+starterNose.position.set(0, 0.36, 1.26);
+mowerStarterKit.add(starterNose);
+
+const starterCanopy = new THREE.Mesh(
+  new THREE.BoxGeometry(0.78, 0.16, 0.52),
+  starterPaintMaterial,
+);
+starterCanopy.position.set(0, 0.82, -0.18);
+mowerStarterKit.add(starterCanopy);
+
+const starterRollBar = new THREE.Mesh(
+  new THREE.TorusGeometry(0.36, 0.04, 10, 18, Math.PI),
+  starterDarkMaterial,
+);
+starterRollBar.position.set(0, 0.97, -0.22);
+starterRollBar.rotation.z = Math.PI;
+mowerStarterKit.add(starterRollBar);
+
+const starterLightL = new THREE.Mesh(
+  new THREE.BoxGeometry(0.14, 0.08, 0.03),
+  starterLightMaterial,
+);
+starterLightL.position.set(-0.3, 0.4, 1.47);
+mowerStarterKit.add(starterLightL);
+
+const starterLightR = new THREE.Mesh(
+  new THREE.BoxGeometry(0.14, 0.08, 0.03),
+  starterLightMaterial,
+);
+starterLightR.position.set(0.3, 0.4, 1.47);
+mowerStarterKit.add(starterLightR);
+
+mowerStarterKit.visible = false;
+mowerDetailedModel.add(mowerStarterKit);
 
 mowerBlueKit = new THREE.Group();
 const bluePaintMaterial = new THREE.MeshPhongMaterial({
@@ -2485,196 +2537,7 @@ grassMesh.frustumCulled = false;
 grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
 
-const rebuildMapDecor = () => {
-  decorGroup.clear();
-  const mapId = huidigeMapId;
-  const decorCount = 20;
-  const decorMaterial = new THREE.MeshLambertMaterial({ color: 0x8b4513 }); // Brown for tree trunk
-
-  for (let i = 0; i < decorCount; i++) {
-    const x = (Math.random() - 0.5) * MAP_SIZE;
-    const z = (Math.random() - 0.5) * MAP_SIZE;
-    let decorMesh;
-
-    if (mapId === "SNOW") {
-      const snowmanBottom = new THREE.Mesh(
-        new THREE.SphereGeometry(0.8, 16, 16),
-        new THREE.MeshLambertMaterial({ color: 0xffffff }),
-      );
-      const snowmanTop = new THREE.Mesh(
-        new THREE.SphereGeometry(0.5, 16, 16),
-        new THREE.MeshLambertMaterial({ color: 0xffffff }),
-      );
-      snowmanTop.position.y = 1.1;
-      decorMesh = new THREE.Group();
-      decorMesh.add(snowmanBottom, snowmanTop);
-      decorMesh.position.set(x, 0.8, z);
-    } else if (mapId === "DESERT") {
-      decorMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.2, 0.2, 3, 8),
-        new THREE.MeshLambertMaterial({ color: 0x228b22 }),
-      ); // Cactus green
-      decorMesh.position.set(x, 1.5, z);
-    } else if (mapId !== "CLASSIC" && mapId !== "HELL") {
-      // Generic trees for other maps
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.2, 0.3, 2, 8),
-        decorMaterial,
-      );
-      const leaves = new THREE.Mesh(
-        new THREE.ConeGeometry(1, 2, 8),
-        new THREE.MeshLambertMaterial({ color: 0x006400 }),
-      ); // Dark green
-      leaves.position.y = 2;
-      decorMesh = new THREE.Group();
-      decorMesh.add(trunk, leaves);
-      decorMesh.position.set(x, 1, z);
-    }
-
-    if (decorMesh) {
-      decorGroup.add(decorMesh);
-    }
-  }
-};
-
-const rebuildMapObstacles = () => {
-  obstacleGroup.clear();
-  const mapId = huidigeMapId;
-  if (mapId === "CLASSIC" || mapId === "HELL") return; // No obstacles in classic or hell
-
-  const obstacleCount = 15;
-  const rockMaterial = new THREE.MeshLambertMaterial({ color: 0x808080 });
-
-  for (let i = 0; i < obstacleCount; i++) {
-    const x = (Math.random() - 0.5) * MAP_SIZE;
-    const z = (Math.random() - 0.5) * MAP_SIZE;
-    const size = 1 + Math.random() * 2;
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(size, 0), rockMaterial);
-    rock.position.set(x, size / 2, z);
-    obstacleGroup.add(rock);
-  }
-};
-
-const initHellCars = () => {
-  hellCarGroup.clear();
-  hellCars.length = 0;
-  const carGeo = new THREE.BoxGeometry(3, 1.5, 5);
-  const carMat = new THREE.MeshPhongMaterial({
-    color: 0x400000,
-    emissive: 0x880000,
-    shininess: 80,
-  });
-  for (let i = 0; i < HELLCAR_COUNT; i++) {
-    const mesh = new THREE.Mesh(carGeo, carMat);
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 50 + Math.random() * (currentMapHalfSize - 70);
-    mesh.position.set(Math.cos(angle) * radius, 0.75, Math.sin(angle) * radius);
-    const car = {
-      mesh,
-      velocity: new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2)
-        .normalize()
-        .multiplyScalar(HELLCAR_WANDER_SPEED),
-    };
-    hellCars.push(car);
-    hellCarGroup.add(mesh);
-  }
-};
-
-const updateHellCars = (deltaFactor) => {
-  if (huidigeMapId !== "HELL") return;
-
-  let playerIsDead = false;
-  const bounds = currentMapHalfSize - 2;
-  const lerpAlpha = Math.min(1, HELLCAR_TURN_LERP_BASE * deltaFactor * 60);
-
-  for (const car of hellCars) {
-    const dxToPlayer = mower.position.x - car.mesh.position.x;
-    const dzToPlayer = mower.position.z - car.mesh.position.z;
-    const distToPlayerSq = dxToPlayer * dxToPlayer + dzToPlayer * dzToPlayer;
-
-    if (distToPlayerSq < HELLCAR_DETECTION_RADIUS_SQ && distToPlayerSq > 1) {
-      const targetVelocity = new THREE.Vector3(dxToPlayer, 0, dzToPlayer)
-        .normalize()
-        .multiplyScalar(HELLCAR_CHASE_SPEED);
-      car.velocity.lerp(targetVelocity, lerpAlpha);
-    } else {
-      if (car.velocity.lengthSq() > HELLCAR_WANDER_SPEED * HELLCAR_WANDER_SPEED * 1.01) {
-        const targetWanderVelocity = car.velocity
-          .clone()
-          .normalize()
-          .multiplyScalar(HELLCAR_WANDER_SPEED);
-        car.velocity.lerp(targetWanderVelocity, lerpAlpha * 0.5);
-      }
-    }
-
-    car.mesh.position.addScaledVector(car.velocity, deltaFactor * 60);
-
-    if (car.mesh.position.x > bounds || car.mesh.position.x < -bounds) {
-      car.velocity.x *= -1;
-      car.mesh.position.x = Math.max(-bounds, Math.min(bounds, car.mesh.position.x));
-    }
-    if (car.mesh.position.z > bounds || car.mesh.position.z < -bounds) {
-      car.velocity.z *= -1;
-      car.mesh.position.z = Math.max(-bounds, Math.min(bounds, car.mesh.position.z));
-    }
-
-    car.mesh.lookAt(car.mesh.position.clone().add(car.velocity));
-
-    if (distToPlayerSq < 5) {
-      playerIsDead = true;
-      break;
-    }
-  }
-
-  if (playerIsDead) {
-    alert("JE BENT DOOD! Je wordt naar de Classic map gestuurd.");
-    mower.position.set(0, 0, 0);
-    window.selectMap("CLASSIC", { openUi: false });
-  }
-};
-
-const solveObstacleCollision = (prevX, prevZ) => {
-  if (
-    huidigeMapId === "CLASSIC" ||
-    huidigeMapId === "HELL" ||
-    obstacleGroup.children.length === 0
-  )
-    return;
-
-  for (const obstacle of obstacleGroup.children) {
-    const dx = mower.position.x - obstacle.position.x;
-    const dz = mower.position.z - obstacle.position.z;
-    const distSq = dx * dx + dz * dz;
-    const radius = obstacle.geometry.parameters.radius;
-    const totalRadius = radius + huidigMowerRadius * 0.5;
-
-    if (distSq < totalRadius * totalRadius) {
-      // Simple push-out collision response
-      const dist = Math.sqrt(distSq);
-      const overlap = totalRadius - dist;
-      if (dist > 0.01) {
-        mower.position.x += (dx / dist) * overlap;
-        mower.position.z += (dz / dist) * overlap;
-      } else {
-        // Exactly on top, move to previous position
-        mower.position.x = prevX;
-        mower.position.z = prevZ;
-      }
-    }
-  }
-};
-
-const grassDummy = new THREE.Object3D();
-const grassData = new Array(totalGrass);
-const regrowQueue = [];
-let regrowQueueHead = 0;
-const UI_UPDATE_INTERVAL_MS = 100;
-
 const applyMapTheme = () => {
-  if (hellCarSpawnTimer) {
-    clearTimeout(hellCarSpawnTimer);
-    hellCarSpawnTimer = null;
-  }
   const map = getMapById(huidigeMapId);
   const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
   scene.background = new THREE.Color(skyColor);
@@ -2689,21 +2552,14 @@ const applyMapTheme = () => {
   if (grassMaterial.color) {
     grassMaterial.color.set(Number(map.grass ?? 0x008000));
   }
-
-  rebuildMapObstacles();
-  rebuildMapDecor();
-
-  if (huidigeMapId === "HELL") {
-    currentMapHalfSize = 400;
-    hellCarSpawnTimer = setTimeout(initHellCars, 30000);
-  } else {
-    currentMapHalfSize = MAP_HALF_SIZE;
-    hellCarGroup.clear();
-    hellCars.length = 0;
-  }
 };
 window.applyMapTheme = applyMapTheme;
 
+const grassDummy = new THREE.Object3D();
+const grassData = new Array(totalGrass);
+const regrowQueue = [];
+let regrowQueueHead = 0;
+const UI_UPDATE_INTERVAL_MS = 100;
 const TARGET_FPS = isLowEndDevice ? 28 : 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 const CREATIVE_UPDATE_SKIP_FRAMES = isLowEndDevice ? 1 : 0;
@@ -2932,15 +2788,11 @@ function animate(nowPerf = performance.now()) {
     mower.position.x += Math.sin(yaw) * s * moveDir;
     mower.position.z += -Math.cos(yaw) * s * moveDir;
   }
-
-  solveObstacleCollision(previousMowerPos.x, previousMowerPos.z);
-
   if (gameMode === "classic" && !oneindigSpeelveldOnd) {
-    const maxPos = currentMapHalfSize - MAP_BOUNDARY_MARGIN;
+    const maxPos = MAP_HALF_SIZE - MAP_BOUNDARY_MARGIN;
     mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
   }
-  updateHellCars(frameFactor);
   if (mowerBlueKit && mowerBlueKit.visible && mowerBlueRotors.length) {
     for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25 * frameFactor;
   }
