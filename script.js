@@ -197,9 +197,9 @@ const MAP_PRESETS = [
   },
 ];
 const DIAMANT_SKINS_SHOP = [
-  { id: "OBSIDIAN", naam: "OBSIDIAN", prijs: 120, kleur: "#111827" },
-  { id: "NEON", naam: "NEON", prijs: 260, kleur: "#22d3ee" },
-  { id: "VOID", naam: "VOID", prijs: 450, kleur: "#7c3aed" },
+  { id: "OBSIDIAN", naam: "OBSIDIAN", prijs: 15, kleur: "#111827" },
+  { id: "NEON", naam: "NEON", prijs: 20, kleur: "#22d3ee" },
+  { id: "VOID", naam: "VOID", prijs: 25, kleur: "#7c3aed" },
 ];
 const DIAMANT_SKIN_IDS = DIAMANT_SKINS_SHOP.map((skin) => skin.id);
 const normalizeMapId = (rawId) => {
