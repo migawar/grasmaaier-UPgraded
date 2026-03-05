@@ -107,6 +107,14 @@ let miniGameTimer = null;
 let miniGameActief = false;
 let miniGameMarkerPos = 0;
 let miniGameMarkerRichting = 1;
+let hellCarSpawnTimer = null;
+const hellCars = [];
+let currentMapHalfSize = 70;
+const HELLCAR_COUNT = 10;
+const HELLCAR_CHASE_SPEED = 0.8;
+const HELLCAR_WANDER_SPEED = 0.3;
+const HELLCAR_DETECTION_RADIUS_SQ = 40 * 40;
+const HELLCAR_TURN_LERP_BASE = 0.02;
 const MINIGAME_CHECK_INTERVAL_MS = 15000;
 const MINIGAME_KANS = 0.18;
 const MINIGAME_COOLDOWN_MS = 45000;
@@ -162,6 +170,14 @@ const MAP_PRESETS = [
     ground: 0x2f8a2f,
     grass: 0x008000,
     fog: null,
+  },
+  {
+    id: "HELL",
+    naam: "HELL",
+    sky: 0x100000,
+    ground: 0x331111,
+    grass: 0x552222,
+    fog: { color: 0x220000, near: 20, far: 150 },
   },
   {
     id: "VOLCANO",
@@ -424,7 +440,7 @@ const getVrijgespeeldeTrofeeen = () => {
 const getTrofeeBeloning = (trofeeLevel) =>
   TROFEE_BELONINGEN[Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))];
 const isOneindigSpeelveldActief = () =>
-  gameMode === "creative" || oneindigSpeelveldOnd;
+  gameMode === "creative" || oneindigSpeelveldOnd || huidigeMapId === "HELL";
 const getChatDisplayName = () => {
   if (ingelogdeGebruiker?.displayName?.trim()) {
     return ingelogdeGebruiker.displayName.trim().slice(0, 24);
@@ -1411,7 +1427,7 @@ window.openShop = () => {
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
   const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(2);
   const radKost = window.getRadKost();
-  overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px;">
+  overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px; max-height:85vh; overflow-y:auto;">
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
         <p style="font-size:24px; margin:8px 0; color:#2ecc71;">Geld: $${geld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         <p style="font-size:26px; margin:10px 0 25px 0;">Diamanten: <span style="color:#85c1e9;">${diamanten}</span></p>
@@ -2065,7 +2081,7 @@ window.openSettings = () => {
   const actieveMap = getMapById(huidigeMapId);
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
-  overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
+  overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:40px; border:8px solid white; border-radius:30px; text-align:center; max-height:85vh; overflow-y:auto;">
         <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
@@ -2079,12 +2095,14 @@ window.openSettings = () => {
         <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;"> RESET GAME </button><br>
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
-window.selectMap = async (mapId) => {
+window.selectMap = async (mapId, options = {}) => {
   huidigeMapId = normalizeMapId(mapId);
   window.applyMapTheme();
   window.updateUI();
   await window.save(true);
-  window.openMapSelect();
+  if (options.openUi !== false) {
+    window.openMapSelect();
+  }
 };
 
 window.openMapSelect = () => {
@@ -2463,7 +2481,196 @@ grassMesh.frustumCulled = false;
 grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
 
+const rebuildMapDecor = () => {
+  decorGroup.clear();
+  const mapId = huidigeMapId;
+  const decorCount = 20;
+  const decorMaterial = new THREE.MeshLambertMaterial({ color: 0x8b4513 }); // Brown for tree trunk
+
+  for (let i = 0; i < decorCount; i++) {
+    const x = (Math.random() - 0.5) * MAP_SIZE;
+    const z = (Math.random() - 0.5) * MAP_SIZE;
+    let decorMesh;
+
+    if (mapId === "SNOW") {
+      const snowmanBottom = new THREE.Mesh(
+        new THREE.SphereGeometry(0.8, 16, 16),
+        new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      );
+      const snowmanTop = new THREE.Mesh(
+        new THREE.SphereGeometry(0.5, 16, 16),
+        new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      );
+      snowmanTop.position.y = 1.1;
+      decorMesh = new THREE.Group();
+      decorMesh.add(snowmanBottom, snowmanTop);
+      decorMesh.position.set(x, 0.8, z);
+    } else if (mapId === "DESERT") {
+      decorMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.2, 3, 8),
+        new THREE.MeshLambertMaterial({ color: 0x228b22 }),
+      ); // Cactus green
+      decorMesh.position.set(x, 1.5, z);
+    } else if (mapId !== "CLASSIC" && mapId !== "HELL") {
+      // Generic trees for other maps
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.3, 2, 8),
+        decorMaterial,
+      );
+      const leaves = new THREE.Mesh(
+        new THREE.ConeGeometry(1, 2, 8),
+        new THREE.MeshLambertMaterial({ color: 0x006400 }),
+      ); // Dark green
+      leaves.position.y = 2;
+      decorMesh = new THREE.Group();
+      decorMesh.add(trunk, leaves);
+      decorMesh.position.set(x, 1, z);
+    }
+
+    if (decorMesh) {
+      decorGroup.add(decorMesh);
+    }
+  }
+};
+
+const rebuildMapObstacles = () => {
+  obstacleGroup.clear();
+  const mapId = huidigeMapId;
+  if (mapId === "CLASSIC" || mapId === "HELL") return; // No obstacles in classic or hell
+
+  const obstacleCount = 15;
+  const rockMaterial = new THREE.MeshLambertMaterial({ color: 0x808080 });
+
+  for (let i = 0; i < obstacleCount; i++) {
+    const x = (Math.random() - 0.5) * MAP_SIZE;
+    const z = (Math.random() - 0.5) * MAP_SIZE;
+    const size = 1 + Math.random() * 2;
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(size, 0), rockMaterial);
+    rock.position.set(x, size / 2, z);
+    obstacleGroup.add(rock);
+  }
+};
+
+const initHellCars = () => {
+  hellCarGroup.clear();
+  hellCars.length = 0;
+  const carGeo = new THREE.BoxGeometry(3, 1.5, 5);
+  const carMat = new THREE.MeshPhongMaterial({
+    color: 0x400000,
+    emissive: 0x880000,
+    shininess: 80,
+  });
+  for (let i = 0; i < HELLCAR_COUNT; i++) {
+    const mesh = new THREE.Mesh(carGeo, carMat);
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 50 + Math.random() * (currentMapHalfSize - 70);
+    mesh.position.set(Math.cos(angle) * radius, 0.75, Math.sin(angle) * radius);
+    const car = {
+      mesh,
+      velocity: new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2)
+        .normalize()
+        .multiplyScalar(HELLCAR_WANDER_SPEED),
+    };
+    hellCars.push(car);
+    hellCarGroup.add(mesh);
+  }
+};
+
+const updateHellCars = (deltaFactor) => {
+  if (huidigeMapId !== "HELL") return;
+
+  let playerIsDead = false;
+  const bounds = currentMapHalfSize - 2;
+  const lerpAlpha = Math.min(1, HELLCAR_TURN_LERP_BASE * deltaFactor * 60);
+
+  for (const car of hellCars) {
+    const dxToPlayer = mower.position.x - car.mesh.position.x;
+    const dzToPlayer = mower.position.z - car.mesh.position.z;
+    const distToPlayerSq = dxToPlayer * dxToPlayer + dzToPlayer * dzToPlayer;
+
+    if (distToPlayerSq < HELLCAR_DETECTION_RADIUS_SQ && distToPlayerSq > 1) {
+      const targetVelocity = new THREE.Vector3(dxToPlayer, 0, dzToPlayer)
+        .normalize()
+        .multiplyScalar(HELLCAR_CHASE_SPEED);
+      car.velocity.lerp(targetVelocity, lerpAlpha);
+    } else {
+      if (car.velocity.lengthSq() > HELLCAR_WANDER_SPEED * HELLCAR_WANDER_SPEED * 1.01) {
+        const targetWanderVelocity = car.velocity
+          .clone()
+          .normalize()
+          .multiplyScalar(HELLCAR_WANDER_SPEED);
+        car.velocity.lerp(targetWanderVelocity, lerpAlpha * 0.5);
+      }
+    }
+
+    car.mesh.position.addScaledVector(car.velocity, deltaFactor * 60);
+
+    if (car.mesh.position.x > bounds || car.mesh.position.x < -bounds) {
+      car.velocity.x *= -1;
+      car.mesh.position.x = Math.max(-bounds, Math.min(bounds, car.mesh.position.x));
+    }
+    if (car.mesh.position.z > bounds || car.mesh.position.z < -bounds) {
+      car.velocity.z *= -1;
+      car.mesh.position.z = Math.max(-bounds, Math.min(bounds, car.mesh.position.z));
+    }
+
+    car.mesh.lookAt(car.mesh.position.clone().add(car.velocity));
+
+    if (distToPlayerSq < 5) {
+      playerIsDead = true;
+      break;
+    }
+  }
+
+  if (playerIsDead) {
+    alert("JE BENT DOOD! Je wordt naar de Classic map gestuurd.");
+    mower.position.set(0, 0, 0);
+    window.selectMap("CLASSIC", { openUi: false });
+  }
+};
+
+const solveObstacleCollision = (prevX, prevZ) => {
+  if (
+    huidigeMapId === "CLASSIC" ||
+    huidigeMapId === "HELL" ||
+    obstacleGroup.children.length === 0
+  )
+    return;
+
+  for (const obstacle of obstacleGroup.children) {
+    const dx = mower.position.x - obstacle.position.x;
+    const dz = mower.position.z - obstacle.position.z;
+    const distSq = dx * dx + dz * dz;
+    const radius = obstacle.geometry.parameters.radius;
+    const totalRadius = radius + huidigMowerRadius * 0.5;
+
+    if (distSq < totalRadius * totalRadius) {
+      // Simple push-out collision response
+      const dist = Math.sqrt(distSq);
+      const overlap = totalRadius - dist;
+      if (dist > 0.01) {
+        mower.position.x += (dx / dist) * overlap;
+        mower.position.z += (dz / dist) * overlap;
+      } else {
+        // Exactly on top, move to previous position
+        mower.position.x = prevX;
+        mower.position.z = prevZ;
+      }
+    }
+  }
+};
+
+const grassDummy = new THREE.Object3D();
+const grassData = new Array(totalGrass);
+const regrowQueue = [];
+let regrowQueueHead = 0;
+const UI_UPDATE_INTERVAL_MS = 100;
+
 const applyMapTheme = () => {
+  if (hellCarSpawnTimer) {
+    clearTimeout(hellCarSpawnTimer);
+    hellCarSpawnTimer = null;
+  }
   const map = getMapById(huidigeMapId);
   const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
   scene.background = new THREE.Color(skyColor);
@@ -2478,14 +2685,21 @@ const applyMapTheme = () => {
   if (grassMaterial.color) {
     grassMaterial.color.set(Number(map.grass ?? 0x008000));
   }
+
+  rebuildMapObstacles();
+  rebuildMapDecor();
+
+  if (huidigeMapId === "HELL") {
+    currentMapHalfSize = 400;
+    hellCarSpawnTimer = setTimeout(initHellCars, 30000);
+  } else {
+    currentMapHalfSize = MAP_HALF_SIZE;
+    hellCarGroup.clear();
+    hellCars.length = 0;
+  }
 };
 window.applyMapTheme = applyMapTheme;
 
-const grassDummy = new THREE.Object3D();
-const grassData = new Array(totalGrass);
-const regrowQueue = [];
-let regrowQueueHead = 0;
-const UI_UPDATE_INTERVAL_MS = 100;
 const TARGET_FPS = isLowEndDevice ? 28 : 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 const CREATIVE_UPDATE_SKIP_FRAMES = isLowEndDevice ? 1 : 0;
@@ -2714,11 +2928,15 @@ function animate(nowPerf = performance.now()) {
     mower.position.x += Math.sin(yaw) * s * moveDir;
     mower.position.z += -Math.cos(yaw) * s * moveDir;
   }
+
+  solveObstacleCollision(previousMowerPos.x, previousMowerPos.z);
+
   if (gameMode === "classic" && !oneindigSpeelveldOnd) {
-    const maxPos = MAP_HALF_SIZE - MAP_BOUNDARY_MARGIN;
+    const maxPos = currentMapHalfSize - MAP_BOUNDARY_MARGIN;
     mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
   }
+  updateHellCars(frameFactor);
   if (mowerBlueKit && mowerBlueKit.visible && mowerBlueRotors.length) {
     for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25 * frameFactor;
   }
