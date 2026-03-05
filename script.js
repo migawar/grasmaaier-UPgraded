@@ -1449,7 +1449,7 @@ window.openMiniGame = () => {
       window.cleanupMiniGame();
       return;
     }
-    if (keys["z"]) {
+    if (keys["o"]) {
       miniGameMarkerPos = 50;
       window.stopMiniGame();
       return;
