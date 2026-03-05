@@ -107,11 +107,11 @@ let miniGameTimer = null;
 let miniGameActief = false;
 let miniGameMarkerPos = 0;
 let miniGameMarkerRichting = 1;
-const MINIGAME_CHECK_INTERVAL_MS = 15000;
-const MINIGAME_KANS = 0.18;
-const MINIGAME_COOLDOWN_MS = 45000;
+const MINIGAME_CHECK_INTERVAL_MS = 9000;
+const MINIGAME_KANS = 0.45;
+const MINIGAME_COOLDOWN_MS = 18000;
 const MINIGAME_REWARD_DIAMANT = 1;
-const MINIGAME_KNOP_DUUR_MS = 30000;
+const MINIGAME_KNOP_DUUR_MS = 60000;
 const MINIGAME_RONDES = 3;
 const MINIGAME_ZONE_BREEDTES = [24, 16, 10];
 let miniGameRonde = 1;
@@ -131,11 +131,27 @@ const CHAT_CLEANUP_BATCH_SIZE = 100;
 const ONLINE_SPELER_WINDOW_MS = 45 * 1000;
 const ONLINE_SPELER_REFRESH_MS = 20 * 1000;
 const TROFEE_DREMPELS = [
-  100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000,
-  10000000000, 100000000000,
+  100,
+  1000,
+  10000,
+  100000,
+  1000000,
+  10000000,
+  100000000,
+  1000000000,
+  10000000000,
+  100000000000,
 ];
 const TROFEE_BELONINGEN = [
-  50, 250, 2000, 15000, 120000, 900000, 7000000, 50000000, 350000000,
+  50,
+  250,
+  2000,
+  15000,
+  120000,
+  900000,
+  7000000,
+  50000000,
+  350000000,
   2500000000,
 ];
 const MAP_PRESETS = [
@@ -187,9 +203,7 @@ const DIAMANT_SKINS_SHOP = [
 ];
 const DIAMANT_SKIN_IDS = DIAMANT_SKINS_SHOP.map((skin) => skin.id);
 const normalizeMapId = (rawId) => {
-  const id = String(rawId ?? "")
-    .trim()
-    .toUpperCase();
+  const id = String(rawId ?? "").trim().toUpperCase();
   return MAP_PRESETS.some((map) => map.id === id) ? id : "CLASSIC";
 };
 const getMapById = (mapId) =>
@@ -218,21 +232,12 @@ let chatSendBtnEl = null;
 let chatStatusEl = null;
 let chatOnlineCountEl = null;
 let chatToggleBtnEl = null;
-let chatHeaderEl = null;
 let chatHeeftOngelezen = false;
 let chatIsOpen = false;
 let chatCleanupIntervalId = null;
 let chatOnlinePollIntervalId = null;
 let chatCleanupBusy = false;
 let chatOnlineBusy = false;
-let chatDragActief = false;
-let chatDragPointerId = null;
-let chatDragStartX = 0;
-let chatDragStartY = 0;
-let chatDragStartLeft = 0;
-let chatDragStartTop = 0;
-let chatDragHeeftBewogen = false;
-let chatSkipToggleKlik = false;
 
 const maanden = [
   "JANUARI",
@@ -490,10 +495,7 @@ const formatDisplayNameFromEmail = (email) => {
   return lokaleNaam.slice(0, 24).toUpperCase();
 };
 const getLeaderboardDisplayName = (data, fallbackId = "") => {
-  if (
-    typeof data?.accountDisplayName === "string" &&
-    data.accountDisplayName.trim()
-  ) {
+  if (typeof data?.accountDisplayName === "string" && data.accountDisplayName.trim()) {
     return data.accountDisplayName.trim().slice(0, 24);
   }
   if (typeof data?.accountEmail === "string" && data.accountEmail.trim()) {
@@ -519,9 +521,7 @@ const getVrijgespeeldeTrofeeen = () => {
   return unlocked;
 };
 const getTrofeeBeloning = (trofeeLevel) =>
-  TROFEE_BELONINGEN[
-    Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))
-  ];
+  TROFEE_BELONINGEN[Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))];
 const isOneindigSpeelveldActief = () =>
   gameMode === "creative" || oneindigSpeelveldOnd;
 const getChatDisplayName = () => {
@@ -548,8 +548,7 @@ const setChatStatus = (tekst = "", kleur = "#9ca3af") => {
 };
 const setChatOnlineCount = (count) => {
   if (!chatOnlineCountEl) return;
-  const value =
-    Number.isFinite(count) && count >= 0 ? Math.max(0, Math.floor(count)) : 0;
+  const value = Number.isFinite(count) && count >= 0 ? Math.max(0, Math.floor(count)) : 0;
   chatOnlineCountEl.textContent = `Online: ${value}`;
   if (chatToggleBtnEl) {
     chatToggleBtnEl.textContent = `LIVE CHAT (${value} online)`;
@@ -587,77 +586,6 @@ const setChatOpenState = (open) => {
   chatPanel.classList.toggle("has-unread", chatHeeftOngelezen && !open);
   if (open) chatHeeftOngelezen = false;
 };
-const clampChatPanelPosition = (left, top) => {
-  if (!chatPanel) return;
-  const margin = 8;
-  const panelBreedte = chatPanel.offsetWidth || 0;
-  const panelHoogte = chatPanel.offsetHeight || 0;
-  const maxLeft = Math.max(margin, window.innerWidth - panelBreedte - margin);
-  const maxTop = Math.max(margin, window.innerHeight - panelHoogte - margin);
-  const safeLeft = Math.min(maxLeft, Math.max(margin, left));
-  const safeTop = Math.min(maxTop, Math.max(margin, top));
-  chatPanel.style.left = `${safeLeft}px`;
-  chatPanel.style.top = `${safeTop}px`;
-  chatPanel.style.right = "auto";
-  chatPanel.style.bottom = "auto";
-};
-const startChatDrag = (event) => {
-  if (!chatPanel) return;
-  if (event.button !== undefined && event.button !== 0) return;
-  const rect = chatPanel.getBoundingClientRect();
-  chatDragActief = true;
-  chatDragPointerId = event.pointerId ?? null;
-  chatDragStartX = event.clientX;
-  chatDragStartY = event.clientY;
-  chatDragStartLeft = rect.left;
-  chatDragStartTop = rect.top;
-  chatDragHeeftBewogen = false;
-  chatPanel.classList.add("is-dragging");
-  chatPanel.style.left = `${rect.left}px`;
-  chatPanel.style.top = `${rect.top}px`;
-  chatPanel.style.right = "auto";
-  chatPanel.style.bottom = "auto";
-  if (
-    typeof event.currentTarget?.setPointerCapture === "function" &&
-    event.pointerId !== undefined
-  ) {
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-  event.preventDefault();
-};
-const onChatDragMove = (event) => {
-  if (!chatDragActief) return;
-  if (
-    chatDragPointerId !== null &&
-    event.pointerId !== undefined &&
-    event.pointerId !== chatDragPointerId
-  ) {
-    return;
-  }
-  const dx = event.clientX - chatDragStartX;
-  const dy = event.clientY - chatDragStartY;
-  if (!chatDragHeeftBewogen && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
-    chatDragHeeftBewogen = true;
-  }
-  clampChatPanelPosition(chatDragStartLeft + dx, chatDragStartTop + dy);
-  event.preventDefault();
-};
-const stopChatDrag = (event) => {
-  if (!chatDragActief) return;
-  if (
-    chatDragPointerId !== null &&
-    event?.pointerId !== undefined &&
-    event.pointerId !== chatDragPointerId
-  ) {
-    return;
-  }
-  if (chatDragHeeftBewogen) {
-    chatSkipToggleKlik = true;
-  }
-  chatDragActief = false;
-  chatDragPointerId = null;
-  chatPanel?.classList.remove("is-dragging");
-};
 const stopChatSubscription = () => {
   if (!chatUnsubscribe) return;
   chatUnsubscribe();
@@ -677,9 +605,7 @@ const cleanupOudeChatBerichten = async () => {
   if (!firebaseDb || chatCleanupBusy) return;
   chatCleanupBusy = true;
   try {
-    const cutoff = Timestamp.fromMillis(
-      Date.now() - CHAT_BERICHT_MAX_LEEFTIJD_MS,
-    );
+    const cutoff = Timestamp.fromMillis(Date.now() - CHAT_BERICHT_MAX_LEEFTIJD_MS);
     const oudeBerichtenQuery = query(
       collection(firebaseDb, FIREBASE_CHAT_COLLECTION),
       where("createdAt", "<=", cutoff),
@@ -726,14 +652,8 @@ const startChatMaintenance = () => {
   }
   cleanupOudeChatBerichten();
   refreshOnlineSpelers();
-  chatCleanupIntervalId = setInterval(
-    cleanupOudeChatBerichten,
-    CHAT_CLEANUP_INTERVAL_MS,
-  );
-  chatOnlinePollIntervalId = setInterval(
-    refreshOnlineSpelers,
-    ONLINE_SPELER_REFRESH_MS,
-  );
+  chatCleanupIntervalId = setInterval(cleanupOudeChatBerichten, CHAT_CLEANUP_INTERVAL_MS);
+  chatOnlinePollIntervalId = setInterval(refreshOnlineSpelers, ONLINE_SPELER_REFRESH_MS);
 };
 const subscribeChat = () => {
   if (!firebaseDb) return;
@@ -756,8 +676,7 @@ const subscribeChat = () => {
       const berichten = snapshot.docs
         .filter((d) => {
           const data = d.data();
-          if (!data?.createdAt || typeof data.createdAt.toDate !== "function")
-            return false;
+          if (!data?.createdAt || typeof data.createdAt.toDate !== "function") return false;
           const isNieuwGenoeg = data.createdAt.toDate().getTime() >= cutoffMs;
           if (!isNieuwGenoeg) teVerwijderen.push(d.ref);
           return isNieuwGenoeg;
@@ -774,16 +693,10 @@ const subscribeChat = () => {
         }
       }
       renderChatBerichten(berichten);
-      if (
-        !chatIsOpen &&
-        snapshot.docChanges().some((c) => c.type === "added")
-      ) {
+      if (!chatIsOpen && snapshot.docChanges().some((c) => c.type === "added")) {
         chatHeeftOngelezen = true;
       }
-      chatPanel?.classList.toggle(
-        "has-unread",
-        chatHeeftOngelezen && !chatIsOpen,
-      );
+      chatPanel?.classList.toggle("has-unread", chatHeeftOngelezen && !chatIsOpen);
       setChatStatus("Live", "#22c55e");
     },
     (err) => {
@@ -827,10 +740,7 @@ window.sendChatMessage = async () => {
     } else if (err?.code === "unavailable") {
       setChatStatus("Chat server offline", "#f87171");
     } else {
-      setChatStatus(
-        `Verzenden mislukt (${err?.code || "onbekend"})`,
-        "#f87171",
-      );
+      setChatStatus(`Verzenden mislukt (${err?.code || "onbekend"})`, "#f87171");
     }
   }
 };
@@ -864,20 +774,8 @@ const buildChatUi = () => {
   chatOnlineCountEl = document.getElementById("chatOnlineCount");
   chatStatusEl = document.getElementById("chatStatus");
   chatToggleBtnEl = document.getElementById("chatToggleBtn");
-  chatHeaderEl = chatPanel.querySelector(".chat-header");
 
-  chatToggleBtnEl?.addEventListener("click", () => {
-    if (chatSkipToggleKlik) {
-      chatSkipToggleKlik = false;
-      return;
-    }
-    setChatOpenState(!chatIsOpen);
-  });
-  chatToggleBtnEl?.addEventListener("pointerdown", startChatDrag);
-  chatHeaderEl?.addEventListener("pointerdown", startChatDrag);
-  document.addEventListener("pointermove", onChatDragMove, { passive: false });
-  document.addEventListener("pointerup", stopChatDrag);
-  document.addEventListener("pointercancel", stopChatDrag);
+  chatToggleBtnEl?.addEventListener("click", () => setChatOpenState(!chatIsOpen));
   chatSendBtnEl?.addEventListener("click", () => window.sendChatMessage());
   chatInputEl?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -971,8 +869,7 @@ document.head.appendChild(globalButtonHitboxStyle);
 document.addEventListener(
   "click",
   (event) => {
-    const btn =
-      event.target instanceof Element ? event.target.closest("button") : null;
+    const btn = event.target instanceof Element ? event.target.closest("button") : null;
     if (!btn || btn.disabled) return;
     if (typeof btn.onclick === "function") return;
     const inlineAction = btn.getAttribute("onclick");
@@ -1145,7 +1042,8 @@ window.applySkinVisual = (skinNaam) => {
 
   const color = override.color ?? basisKleur;
   const emissive = override.emissive ?? (isRed ? 0x220000 : 0x1f1f1f);
-  const emissiveIntensity = override.emissiveIntensity ?? (isRed ? 0.12 : 0.3);
+  const emissiveIntensity =
+    override.emissiveIntensity ?? (isRed ? 0.12 : 0.3);
   const specular = override.specular ?? (isRed ? 0x333333 : 0xcfcfcf);
   const shininess = override.shininess ?? (isRed ? 22 : 70);
 
@@ -1246,9 +1144,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   if (!snapshot) return false;
   geld = snapshot.geld;
   totaalVerdiend = snapshot.totaalVerdiend;
-  totaalVerdiendVoorTrofeeen = Number.isFinite(
-    snapshot.totaalVerdiendVoorTrofeeen,
-  )
+  totaalVerdiendVoorTrofeeen = Number.isFinite(snapshot.totaalVerdiendVoorTrofeeen)
     ? snapshot.totaalVerdiendVoorTrofeeen
     : 0;
   totaalGemaaid = snapshot.totaalGemaaid;
@@ -1257,10 +1153,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   geclaimdeTrofeeen = Number.isFinite(snapshot.geclaimdeTrofeeen)
     ? snapshot.geclaimdeTrofeeen
     : 0;
-  geclaimdeTrofeeen = Math.max(
-    0,
-    Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen),
-  );
+  geclaimdeTrofeeen = Math.max(0, Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen));
   grasWaarde = snapshot.grasWaarde;
   huidigeSnelheid = snapshot.huidigeSnelheid;
   huidigMowerRadius = snapshot.huidigMowerRadius;
@@ -1275,9 +1168,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   eventMaandKey = snapshot.eventMaandKey || getHuidigeEventMaandKey();
   spelerResetMaandKey =
     snapshot.spelerResetMaandKey || getHuidigeEventMaandKey();
-  actieveOpdracht = snapshot.actieveOpdracht
-    ? { ...snapshot.actieveOpdracht }
-    : null;
+  actieveOpdracht = snapshot.actieveOpdracht ? { ...snapshot.actieveOpdracht } : null;
   eventOpdracht = snapshot.eventOpdracht ? { ...snapshot.eventOpdracht } : null;
   rewardKlaar = snapshot.rewardKlaar;
   eventRewardKlaar = snapshot.eventRewardKlaar;
@@ -1285,9 +1176,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   ontgrendeldeSkins = [...snapshot.ontgrendeldeSkins];
   shopUpgradeLevel = snapshot.shopUpgradeLevel;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
-  rebirtCount = Number.isFinite(snapshot.rebirtCount)
-    ? snapshot.rebirtCount
-    : 0;
+  rebirtCount = Number.isFinite(snapshot.rebirtCount) ? snapshot.rebirtCount : 0;
   shopUpgradeLevel = 0;
   verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
   radDraaiCount = snapshot.radDraaiCount;
@@ -1310,13 +1199,9 @@ window.resetClassicGrassField = () => {
   for (let x = 0; x < grassPerSide; x++) {
     for (let z = 0; z < grassPerSide; z++) {
       const gx =
-        -MAP_HALF_SIZE +
-        x * GRASS_SPACING +
-        Math.random() * GRASS_POSITION_JITTER;
+        -MAP_HALF_SIZE + x * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
       const gz =
-        -MAP_HALF_SIZE +
-        z * GRASS_SPACING +
-        Math.random() * GRASS_POSITION_JITTER;
+        -MAP_HALF_SIZE + z * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
       const g = grassData[i];
       g.x = gx;
       g.z = gz;
@@ -1422,18 +1307,12 @@ window.openTrofee = () => {
     const drempel = TROFEE_DREMPELS[i - 1];
     const vorigeDrempel = i === 1 ? 0 : TROFEE_DREMPELS[i - 2];
     const stapDoel = Math.max(1, drempel - vorigeDrempel);
-    const stapVoortgang = Math.max(
-      0,
-      Math.min(stapDoel, progress - vorigeDrempel),
-    );
-    const stapPct = geclaimd
-      ? 100
-      : Math.max(0, Math.min(100, (stapVoortgang / stapDoel) * 100));
+    const stapVoortgang = Math.max(0, Math.min(stapDoel, progress - vorigeDrempel));
+    const stapPct = geclaimd ? 100 : Math.max(0, Math.min(100, (stapVoortgang / stapDoel) * 100));
     const belBedrag = getTrofeeBeloning(i);
-    const bel =
-      i === 10
-        ? `$${belBedrag.toLocaleString()} + BLUE SKIN`
-        : `$${belBedrag.toLocaleString()}`;
+    const bel = i === 10
+      ? `$${belBedrag.toLocaleString()} + BLUE SKIN`
+      : `$${belBedrag.toLocaleString()}`;
     h += `<div style="padding:20px; margin:10px; background:#222; border-radius:15px; display:flex; justify-content:space-between; align-items:center; border:3px solid ${geclaimd ? "#2ecc71" : kan ? "#f1c40f" : "#444"};">
             <div style="text-align:left; min-width:320px;">
               <div style="font-size:24px;">TROFEE ${i}</div>
@@ -1487,12 +1366,8 @@ window.openLeaderboard = async () => {
     });
     spelers.sort((a, b) => b.totaalVerdiend - a.totaalVerdiend);
     const topTien = spelers.slice(0, 10);
-    const mijnUid = ingelogdeGebruiker?.uid
-      ? String(ingelogdeGebruiker.uid)
-      : "";
-    const mijnIndex = mijnUid
-      ? spelers.findIndex((speler) => speler.uid === mijnUid)
-      : -1;
+    const mijnUid = ingelogdeGebruiker?.uid ? String(ingelogdeGebruiker.uid) : "";
+    const mijnIndex = mijnUid ? spelers.findIndex((speler) => speler.uid === mijnUid) : -1;
     const mijnPositie =
       mijnIndex >= 0
         ? {
@@ -1505,10 +1380,7 @@ window.openLeaderboard = async () => {
     const lijstHtml = topTien.length
       ? topTien
           .map(
-            (
-              speler,
-              index,
-            ) => `<div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:${index < 3 ? "#1b2631" : "#1f2937"}; border:2px solid ${index < 3 ? "#f1c40f" : "#334155"};">
+            (speler, index) => `<div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:${index < 3 ? "#1b2631" : "#1f2937"}; border:2px solid ${index < 3 ? "#f1c40f" : "#334155"};">
               <div style="font-size:24px; color:${index < 3 ? "#f1c40f" : "#93c5fd"};">#${index + 1}</div>
               <div style="font-size:22px; color:white; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(speler.naam)}</div>
               <div style="font-size:22px; color:#2ecc71; text-align:right;">$${speler.totaalVerdiend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
@@ -1670,9 +1542,7 @@ window.openShop = () => {
   overlay.style.pointerEvents = "auto";
   if (!Number.isFinite(geld) || geld < 0) geld = 0;
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
-  const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(
-    2,
-  );
+  const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(2);
   const radKost = window.getRadKost();
   const skinShopHtml = DIAMANT_SKINS_SHOP.map((skin) => {
     const gekocht = ontgrendeldeSkins.includes(skin.id);
@@ -2167,14 +2037,9 @@ window.applySaveData = (d) => {
   eventLevel = Number.isFinite(d.eventLevel) ? d.eventLevel : 1;
   huidigeSkin = d.huidigeSkin || "STARTER";
   ontgrendeldeSkins = Array.isArray(d.ontgrendeldeSkins)
-    ? [
-        ...new Set(
-          d.ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()),
-        ),
-      ]
+    ? [...new Set(d.ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()))]
     : ["STARTER"];
-  if (!ontgrendeldeSkins.includes("STARTER"))
-    ontgrendeldeSkins.unshift("STARTER");
+  if (!ontgrendeldeSkins.includes("STARTER")) ontgrendeldeSkins.unshift("STARTER");
   if (!ontgrendeldeSkins.includes(huidigeSkin)) huidigeSkin = "STARTER";
   eventMaandKey =
     typeof d.eventMaandKey === "string" && /^\d{4}-\d{2}$/.test(d.eventMaandKey)
@@ -2291,10 +2156,7 @@ window.toggleGoogleLogin = async () => {
       return;
     }
     localStateVoorLogin = window.getSaveData();
-    localStorage.setItem(
-      PRELOGIN_BACKUP_KEY,
-      JSON.stringify(localStateVoorLogin),
-    );
+    localStorage.setItem(PRELOGIN_BACKUP_KEY, JSON.stringify(localStateVoorLogin));
     await signInWithPopup(firebaseAuth, googleProvider);
   } catch (err) {
     console.error("Google login fout:", err);
@@ -2374,9 +2236,7 @@ window.openResetConfirm = () => {
 
 window.openSettings = () => {
   const accountNaam = getAccountLabel();
-  const accountKnopTekst = ingelogdeGebruiker
-    ? "UITLOGGEN"
-    : "INLOGGEN MET GOOGLE";
+  const accountKnopTekst = ingelogdeGebruiker ? "UITLOGGEN" : "INLOGGEN MET GOOGLE";
   const accountKnopKleur = ingelogdeGebruiker ? "#e67e22" : "#4285f4";
   const actieveMap = getMapById(huidigeMapId);
   overlay.style.left = "0";
@@ -2962,19 +2822,10 @@ scene.add(grassMesh);
 
 const applyMapTheme = () => {
   const map = getMapById(huidigeMapId);
-  const skyColor =
-    lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
+  const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
   scene.background = new THREE.Color(skyColor);
-  if (
-    map.fog &&
-    Number.isFinite(map.fog.near) &&
-    Number.isFinite(map.fog.far)
-  ) {
-    scene.fog = new THREE.Fog(
-      Number(map.fog.color ?? skyColor),
-      map.fog.near,
-      map.fog.far,
-    );
+  if (map.fog && Number.isFinite(map.fog.near) && Number.isFinite(map.fog.far)) {
+    scene.fog = new THREE.Fog(Number(map.fog.color ?? skyColor), map.fog.near, map.fog.far);
   } else {
     scene.fog = null;
   }
@@ -3007,13 +2858,9 @@ let grassIndex = 0;
 for (let x = 0; x < grassPerSide; x++) {
   for (let z = 0; z < grassPerSide; z++) {
     const gx =
-      -MAP_HALF_SIZE +
-      x * GRASS_SPACING +
-      Math.random() * GRASS_POSITION_JITTER;
+      -MAP_HALF_SIZE + x * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
     const gz =
-      -MAP_HALF_SIZE +
-      z * GRASS_SPACING +
-      Math.random() * GRASS_POSITION_JITTER;
+      -MAP_HALF_SIZE + z * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
     grassData[grassIndex] = {
       x: gx,
       z: gz,
@@ -3066,17 +2913,8 @@ window.onkeyup = (e) => {
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(
-    Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO),
-  );
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (chatPanel?.style.left && chatPanel?.style.top) {
-    const huidigeLeft = Number.parseFloat(chatPanel.style.left);
-    const huidigeTop = Number.parseFloat(chatPanel.style.top);
-    if (Number.isFinite(huidigeLeft) && Number.isFinite(huidigeTop)) {
-      clampChatPanelPosition(huidigeLeft, huidigeTop);
-    }
-  }
 });
 
 function cutGrassAtIndex(i, now) {
@@ -3250,8 +3088,7 @@ function animate(nowPerf = performance.now()) {
 
   const deltaSec = FRAME_INTERVAL_MS / 1000;
   const frameFactor = Math.min(3, deltaSec * 60);
-  let s =
-    (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
+  let s = (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
   const turnSpeed = BASE_TURN_SPEED * frameFactor;
   const now = Date.now();
   totaalSpeeltijdSec += deltaSec;
@@ -3361,10 +3198,7 @@ function animate(nowPerf = performance.now()) {
   cameraSwayOffset.lerp(cameraSwayTarget, swayLerp);
   setWorldVectorFromLocalXZ(cameraOffsetWorld, CAMERA_OFFSET, yaw);
   setWorldVectorFromLocalXZ(cameraSwayWorld, cameraSwayOffset, yaw);
-  desiredCameraPos
-    .copy(mower.position)
-    .add(cameraOffsetWorld)
-    .add(cameraSwayWorld);
+  desiredCameraPos.copy(mower.position).add(cameraOffsetWorld).add(cameraSwayWorld);
   const camPosLerp = 1 - Math.exp(-CAMERA_POSITION_SMOOTHNESS * deltaSec);
   camera.position.lerp(desiredCameraPos, camPosLerp);
   cameraLookAhead
@@ -3385,7 +3219,7 @@ if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
 window.initFirebase();
 
-setInterval(() => window.save(), 10000);
+setInterval(() => window.save(), 5000);
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
 window.applyMapTheme();
