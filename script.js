@@ -97,6 +97,7 @@ let rebirtCount = 0;
 let totaalSpeeltijdSec = 0;
 let totaalVerdiendVoorTrofeeen = 0;
 let lichtKleur = "default";
+let huidigeMapId = "CLASSIC";
 let radDraaiCount = 0;
 let radIsSpinning = false;
 let miniGameKnopZichtbaar = false;
@@ -153,6 +154,54 @@ const TROFEE_BELONINGEN = [
   350000000,
   2500000000,
 ];
+const MAP_PRESETS = [
+  {
+    id: "CLASSIC",
+    naam: "CLASSIC",
+    sky: 0x222222,
+    ground: 0x2f8a2f,
+    grass: 0x008000,
+    fog: null,
+  },
+  {
+    id: "VOLCANO",
+    naam: "VOLCANO",
+    sky: 0x1a1010,
+    ground: 0x3d2b2b,
+    grass: 0x6a3b3b,
+    fog: { color: 0x2a1818, near: 35, far: 180 },
+  },
+  {
+    id: "DESERT",
+    naam: "DESERT",
+    sky: 0xd8b26a,
+    ground: 0xc89b52,
+    grass: 0xb28947,
+    fog: { color: 0xd2b678, near: 50, far: 220 },
+  },
+  {
+    id: "SNOW",
+    naam: "SNOW",
+    sky: 0x9fc4e6,
+    ground: 0xc8d7e6,
+    grass: 0xdce8f3,
+    fog: { color: 0xcad9e8, near: 40, far: 210 },
+  },
+  {
+    id: "NEON_CITY",
+    naam: "NEON CITY",
+    sky: 0x0b1020,
+    ground: 0x1f2a46,
+    grass: 0x284777,
+    fog: { color: 0x101b33, near: 55, far: 230 },
+  },
+];
+const normalizeMapId = (rawId) => {
+  const id = String(rawId ?? "").trim().toUpperCase();
+  return MAP_PRESETS.some((map) => map.id === id) ? id : "CLASSIC";
+};
+const getMapById = (mapId) =>
+  MAP_PRESETS.find((map) => map.id === normalizeMapId(mapId)) || MAP_PRESETS[0];
 const firebaseConfig = {
   apiKey: "AIzaSyA0ukZ0I5xK3XWdeRc3cEckLq-M1Eu05RM",
   authDomain: "grasmaaier-accaunts.firebaseapp.com",
@@ -1688,9 +1737,7 @@ window.toggleAutoSave = () => {
 
 window.toggleLichtKleur = () => {
   lichtKleur = lichtKleur === "hemelsblauw" ? "default" : "hemelsblauw";
-  scene.background = new THREE.Color(
-    lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-  );
+  window.applyMapTheme();
   window.openSettings();
 };
 
@@ -1750,6 +1797,7 @@ window.getSaveData = () => ({
   verdienMultiplier,
   totaalSpeeltijdSec,
   lichtKleur,
+  huidigeMapId,
   radDraaiCount,
   creativeSpeed,
   fpsMeterOnd,
@@ -1819,6 +1867,7 @@ window.applySaveData = (d) => {
     : 0;
   lichtKleur =
     d.lichtKleur === "blue" ? "hemelsblauw" : (d.lichtKleur ?? "default");
+  huidigeMapId = normalizeMapId(d.huidigeMapId);
   radDraaiCount = Number.isFinite(d.radDraaiCount) ? d.radDraaiCount : 0;
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   fpsMeterOnd = Boolean(d.fpsMeterOnd);
@@ -1839,9 +1888,7 @@ window.loadCloudSave = async () => {
     if (!snap.exists()) return false;
     const geladen = window.applySaveData(snap.data());
     if (!geladen) return false;
-    scene.background = new THREE.Color(
-      lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-    );
+    window.applyMapTheme();
     if (!actieveOpdracht) window.genereerMissie(false);
     if (!eventOpdracht) window.genereerMissie(true);
     window.applySkinVisual(huidigeSkin);
@@ -1878,9 +1925,7 @@ window.initFirebase = () => {
         }
         if (backup) {
           window.applySaveData(backup);
-          scene.background = new THREE.Color(
-            lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-          );
+          window.applyMapTheme();
           if (!actieveOpdracht) window.genereerMissie(false);
           if (!eventOpdracht) window.genereerMissie(true);
           window.applySkinVisual(huidigeSkin);
@@ -1994,6 +2039,7 @@ window.openSettings = () => {
   const accountNaam = getAccountLabel();
   const accountKnopTekst = ingelogdeGebruiker ? "UITLOGGEN" : "INLOGGEN MET GOOGLE";
   const accountKnopKleur = ingelogdeGebruiker ? "#e67e22" : "#4285f4";
+  const actieveMap = getMapById(huidigeMapId);
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center;">
@@ -2003,11 +2049,49 @@ window.openSettings = () => {
         <button onclick="window.toggleOneindigSpeelveld()" style="width:400px; padding:20px; background:${oneindigSpeelveldOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ONEINDIG SPEELVELD: ${oneindigSpeelveldOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
         <button onclick="window.toggleFpsMeter()" style="width:400px; padding:20px; background:${fpsMeterOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">FPS METER: ${fpsMeterOnd ? "AAN" : "UIT"}</button><br>
+        <button onclick="window.openMapSelect()" style="width:400px; padding:18px; background:#2563eb; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">MAP: ${actieveMap.naam}</button><br>
         <div style="width:400px; padding:12px 16px; margin:0 auto 10px; background:#222; border:2px solid #555; border-radius:15px; color:#ddd; font-family:Impact; font-size:20px;">ACCOUNT: ${accountNaam}</div>
         <button onclick="window.toggleGoogleLogin()" style="width:400px; padding:18px; background:${accountKnopKleur}; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">${accountKnopTekst}</button><br>
         <button onclick="window.openInfoPage()" style="width:400px; padding:16px; background:#1f2937; color:#93c5fd; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">INFO PAGINA</button><br>
         <button onclick="window.openResetConfirm()" style="width:400px; padding:15px; background:#c0392b; color:white; font-family:Impact; font-size:22px; cursor:pointer; border:4px solid white; border-radius:15px;"> RESET GAME </button><br>
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
+};
+window.selectMap = async (mapId) => {
+  huidigeMapId = normalizeMapId(mapId);
+  window.applyMapTheme();
+  window.updateUI();
+  await window.save(true);
+  window.openMapSelect();
+};
+
+window.openMapSelect = () => {
+  const actieveMap = getMapById(huidigeMapId);
+  const lijstHtml = MAP_PRESETS.map((map) => {
+    const actief = map.id === actieveMap.id;
+    return `<div style="text-align:left; background:#161b22; border:3px solid ${actief ? "#22c55e" : "#374151"}; border-radius:14px; padding:14px; margin:10px 0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:14px;">
+        <div>
+          <div style="font-size:24px; color:#93c5fd;">${escapeHtml(map.naam)}</div>
+        </div>
+        <button data-map-select="${map.id}" style="padding:12px 22px; border:none; border-radius:10px; font-family:Impact; font-size:20px; cursor:pointer; background:${actief ? "#22c55e" : "#2563eb"}; color:white;">${actief ? "ACTIEF" : "KIES"}</button>
+      </div>
+    </div>`;
+  }).join("");
+  overlay.style.left = "0";
+  overlay.style.pointerEvents = "auto";
+  overlay.innerHTML = `<div style="background:#111; padding:40px; border:8px solid #2563eb; border-radius:30px; text-align:center; min-width:680px; max-width:900px; max-height:85vh; overflow-y:auto;">
+    <h1 style="color:#93c5fd; font-size:52px; margin-bottom:8px;">MAPS</h1>
+    <p style="margin-bottom:12px; color:#dbeafe;">Kies een map-thema.</p>
+    ${lijstHtml}
+    <button onclick="window.openSettings()" style="margin-top:18px; padding:14px 56px; background:#2563eb; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">TERUG</button>
+  </div>`;
+  overlay.querySelectorAll("[data-map-select]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const gekozen = btn.getAttribute("data-map-select");
+      if (!gekozen) return;
+      window.selectMap(gekozen);
+    });
+  });
 };
 window.openCheat = () => {
   const c = (prompt("CODE:") || "").trim().toUpperCase();
@@ -2356,6 +2440,24 @@ grassMesh.frustumCulled = false;
 grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
 
+const applyMapTheme = () => {
+  const map = getMapById(huidigeMapId);
+  const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
+  scene.background = new THREE.Color(skyColor);
+  if (map.fog && Number.isFinite(map.fog.near) && Number.isFinite(map.fog.far)) {
+    scene.fog = new THREE.Fog(Number(map.fog.color ?? skyColor), map.fog.near, map.fog.far);
+  } else {
+    scene.fog = null;
+  }
+  if (ground.material?.color) {
+    ground.material.color.set(Number(map.ground ?? GROUND_COLOR));
+  }
+  if (grassMaterial.color) {
+    grassMaterial.color.set(Number(map.grass ?? 0x008000));
+  }
+};
+window.applyMapTheme = applyMapTheme;
+
 const grassDummy = new THREE.Object3D();
 const grassData = new Array(totalGrass);
 const regrowQueue = [];
@@ -2694,7 +2796,5 @@ window.initFirebase();
 setInterval(() => window.save(), 5000);
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
-scene.background = new THREE.Color(
-  lichtKleur === "hemelsblauw" ? 0x87ceeb : 0x222222,
-);
+window.applyMapTheme();
 animate();
