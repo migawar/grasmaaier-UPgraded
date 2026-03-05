@@ -900,6 +900,7 @@ document.addEventListener(
 
 ui.innerHTML = `
     <div id="geldDisp" style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.8); padding:15px 30px; border-radius:15px; border:4px solid #2ecc71; pointer-events:auto; color:#2ecc71; font-size:45px;">$ 0.00</div>
+    <div id="hellHud" style="position:absolute; top:120px; left:20px; background:rgba(100,0,0,0.8); padding:10px 20px; border-radius:12px; border:4px solid #ff4444; color:#ffdddd; font-size:28px; display:none;">KILLS: 0 / 10</div>
     <div id="diamantDisp" style="position:absolute; top:145px; right:20px; background:rgba(0,0,0,0.8); padding:10px 24px; border-radius:12px; border:4px solid #5dade2; pointer-events:auto; color:#85c1e9; font-size:30px; text-align:right;">DIAMANTEN: 0</div>
     <div id="trofeeDisp" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:10px 25px; border-radius:15px; border:4px solid #f1c40f; pointer-events:auto; text-align:right;"></div>
     <div id="miniGameSlot" style="position:absolute; top:300px; right:20px; pointer-events:auto;"></div>
@@ -937,6 +938,18 @@ window.updateUI = () => {
   setDisplay("gpBtn", !isCreative);
   setDisplay("rightPanel", !isCreative, "flex");
   setDisplay("fpsDisp", fpsMeterOnd);
+
+  const hellHudEl = document.getElementById("hellHud");
+  if (huidigeMapId === "HELL" && !isCreative) {
+    if (hellHudEl) {
+      hellHudEl.style.display = "block";
+      hellHudEl.innerHTML = `KILLS: ${hellKills} / 10`;
+    }
+  } else {
+    if (hellHudEl) {
+      hellHudEl.style.display = "none";
+    }
+  }
 
   if (isCreative) {
     miniGameKnopZichtbaar = false;
@@ -2020,6 +2033,7 @@ window.getSaveData = () => ({
   creativeSpeed,
   fpsMeterOnd,
   oneindigSpeelveldOnd,
+  hellCooldownTot,
   gebruikteRedeemCodes: [...gebruikteRedeemCodes],
 });
 
@@ -2090,6 +2104,7 @@ window.applySaveData = (d) => {
   creativeSpeed = Number.isFinite(d.creativeSpeed) ? d.creativeSpeed : 0.5;
   fpsMeterOnd = Boolean(d.fpsMeterOnd);
   oneindigSpeelveldOnd = Boolean(d.oneindigSpeelveldOnd);
+  hellCooldownTot = Number.isFinite(d.hellCooldownTot) ? d.hellCooldownTot : 0;
   gebruikteRedeemCodes = Array.isArray(d.gebruikteRedeemCodes)
     ? d.gebruikteRedeemCodes
         .map((code) => String(code).trim().toUpperCase())
@@ -2275,6 +2290,12 @@ window.openSettings = () => {
         <button onclick="window.sluit()" style="padding:15px 80px; background:#2ecc71; color:white; font-family:Impact; font-size:30px; border:none; border-radius:15px; cursor:pointer; margin-top:20px;">SLUITEN</button></div>`;
 };
 window.selectMap = async (mapId) => {
+  if (mapId === "HELL" && Date.now() < hellCooldownTot) {
+    const resterendeMs = hellCooldownTot - Date.now();
+    const resterendeMinuten = Math.ceil(resterendeMs / 60000);
+    alert(`De hel is nog ${resterendeMinuten} minuten gesloten.`);
+    return;
+  }
   huidigeMapId = normalizeMapId(mapId);
   window.applyMapTheme();
   window.updateUI();
@@ -2857,6 +2878,8 @@ const activeProjectiles = [];
 let cannonYaw = 0;
 let lastShotTime = 0;
 let playerHealth = 100;
+let hellKills = 0;
+let hellCooldownTot = 0;
 
 function createHellCar() {
   const g = new THREE.Group();
@@ -2894,6 +2917,27 @@ function createRock() {
   return m;
 }
 
+function spawnSingleHellcar() {
+  const car = createHellCar();
+  const angle = Math.random() * Math.PI * 2;
+  const dist = 35 + Math.random() * 30;
+  car.position.set(
+    mower.position.x + Math.sin(angle) * dist,
+    0,
+    mower.position.z + Math.cos(angle) * dist,
+  );
+  themeObjectsGroup.add(car);
+  activeThemeEntities.push({ mesh: car, type: 'hellcar', speed: 2.8 + Math.random() * 1.5 });
+}
+
+function exitHell(reasonMessage) {
+  huidigeMapId = "CLASSIC";
+  hellCooldownTot = Date.now() + 5 * 60 * 1000; // 5 minuten
+  window.applyMapTheme();
+  window.save(true);
+  alert(reasonMessage);
+}
+
 window.spawnThemeObjects = () => {
   while(themeObjectsGroup.children.length > 0) themeObjectsGroup.remove(themeObjectsGroup.children[0]);
   activeThemeEntities.length = 0;
@@ -2904,6 +2948,7 @@ window.spawnThemeObjects = () => {
 
   if (huidigeMapId === "HELL") {
     playerHealth = 100;
+    hellKills = 0;
     mowerCannon.visible = true;
     for(let i=0; i<12; i++) {
       const car = createHellCar();
@@ -3234,23 +3279,20 @@ function animate(nowPerf = performance.now()) {
       if (ent.type === 'hellcar') {
         const distanceToPlayer = ent.mesh.position.distanceTo(target);
         if (distanceToPlayer < 1.8) {
-          // Schade aan speler: verlies geld en vernietig de auto.
           geld = Math.max(0, geld - 100);
           uiDirty = true;
           window.triggerDamageFlash();
           playerHealth -= 20;
 
-          if (playerHealth <= 0) {
-            huidigeMapId = "CLASSIC";
-            window.applyMapTheme();
-            window.save(true);
-            const naam = getChatDisplayName();
-            window.sendChatMessage(`${naam} is verloren in HELL`);
-            alert("Je bent bezweken in de HEL! Terug naar CLASSIC.");
-          }
-
           themeObjectsGroup.remove(ent.mesh);
           activeThemeEntities.splice(i, 1);
+          if (playerHealth <= 0) {
+            exitHell("Je bent bezweken in de HEL! Terug naar CLASSIC. De hel is voor 5 minuten gesloten.");
+            const naam = getChatDisplayName();
+            window.sendChatMessage(`${naam} is verloren in HELL`);
+          } else {
+            spawnSingleHellcar();
+          }
           continue; // Ga naar de volgende entiteit
         }
 
@@ -3270,6 +3312,14 @@ function animate(nowPerf = performance.now()) {
         if (ent.type === 'hellcar' && p.mesh.position.distanceTo(ent.mesh.position) < 2.0) {
           themeObjectsGroup.remove(ent.mesh);
           activeThemeEntities.splice(j, 1);
+          hellKills++;
+          uiDirty = true;
+          if (hellKills >= 10) {
+            diamanten++;
+            exitHell("10 kills! Je hebt 1 diamant verdiend en ontsnapt uit de hel. De hel is voor 5 minuten gesloten.");
+          } else {
+            spawnSingleHellcar();
+          }
           hit = true;
           break;
         }
