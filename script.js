@@ -28,6 +28,10 @@ import {
 // --- 1. ENGINE SETUP ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x222222);
+const hellCarGroup = new THREE.Group();
+const obstacleGroup = new THREE.Group();
+const decorGroup = new THREE.Group();
+scene.add(hellCarGroup, obstacleGroup, decorGroup);
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
