@@ -107,11 +107,11 @@ let miniGameTimer = null;
 let miniGameActief = false;
 let miniGameMarkerPos = 0;
 let miniGameMarkerRichting = 1;
-const MINIGAME_CHECK_INTERVAL_MS = 15000;
-const MINIGAME_KANS = 0.18;
-const MINIGAME_COOLDOWN_MS = 45000;
+const MINIGAME_CHECK_INTERVAL_MS = 9000;
+const MINIGAME_KANS = 0.45;
+const MINIGAME_COOLDOWN_MS = 18000;
 const MINIGAME_REWARD_DIAMANT = 1;
-const MINIGAME_KNOP_DUUR_MS = 30000;
+const MINIGAME_KNOP_DUUR_MS = 60000;
 const MINIGAME_RONDES = 3;
 const MINIGAME_ZONE_BREEDTES = [24, 16, 10];
 let miniGameRonde = 1;
@@ -126,20 +126,32 @@ const FIREBASE_CHAT_COLLECTION = "global_chat";
 const CHAT_MAX_BERICHT_LENGTE = 200;
 const CHAT_MAX_BERICHTEN = 40;
 const CHAT_BERICHT_MAX_LEEFTIJD_MS = 24 * 60 * 60 * 1000;
-const CHAT_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+const CHAT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const CHAT_CLEANUP_BATCH_SIZE = 100;
-const ONLINE_SPELER_WINDOW_MS = 4 * 60 * 1000;
-const ONLINE_SPELER_REFRESH_MS = 60 * 1000;
-const ONLINE_SPELER_MAX_DOCS = 250;
-const CLOUD_SAVE_MIN_INTERVAL_MS = 5 * 60 * 1000;
-const CLOUD_SAVE_MAX_DEFER_MS = 10 * 60 * 1000;
-const CLOUD_PRESENCE_WRITE_INTERVAL_MS = 90 * 1000;
+const ONLINE_SPELER_WINDOW_MS = 45 * 1000;
+const ONLINE_SPELER_REFRESH_MS = 20 * 1000;
 const TROFEE_DREMPELS = [
-  100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000,
-  10000000000, 100000000000,
+  100,
+  1000,
+  10000,
+  100000,
+  1000000,
+  10000000,
+  100000000,
+  1000000000,
+  10000000000,
+  100000000000,
 ];
 const TROFEE_BELONINGEN = [
-  50, 250, 2000, 15000, 120000, 900000, 7000000, 50000000, 350000000,
+  50,
+  250,
+  2000,
+  15000,
+  120000,
+  900000,
+  7000000,
+  50000000,
+  350000000,
   2500000000,
 ];
 const MAP_PRESETS = [
@@ -183,11 +195,23 @@ const MAP_PRESETS = [
     grass: 0x284777,
     fog: { color: 0x101b33, near: 55, far: 230 },
   },
+  {
+    id: "HELL",
+    naam: "HELL",
+    sky: 0x2b0505,
+    ground: 0x1a0505,
+    grass: 0x4a0a0a,
+    fog: { color: 0x2b0505, near: 15, far: 100 },
+  },
 ];
+const DIAMANT_SKINS_SHOP = [
+  { id: "OBSIDIAN", naam: "OBSIDIAN", prijs: 15, kleur: "#111827" },
+  { id: "NEON", naam: "NEON", prijs: 20, kleur: "#22d3ee" },
+  { id: "VOID", naam: "VOID", prijs: 25, kleur: "#7c3aed" },
+];
+const DIAMANT_SKIN_IDS = DIAMANT_SKINS_SHOP.map((skin) => skin.id);
 const normalizeMapId = (rawId) => {
-  const id = String(rawId ?? "")
-    .trim()
-    .toUpperCase();
+  const id = String(rawId ?? "").trim().toUpperCase();
   return MAP_PRESETS.some((map) => map.id === id) ? id : "CLASSIC";
 };
 const getMapById = (mapId) =>
@@ -216,28 +240,12 @@ let chatSendBtnEl = null;
 let chatStatusEl = null;
 let chatOnlineCountEl = null;
 let chatToggleBtnEl = null;
-let chatHeaderEl = null;
 let chatHeeftOngelezen = false;
 let chatIsOpen = false;
 let chatCleanupIntervalId = null;
 let chatOnlinePollIntervalId = null;
 let chatCleanupBusy = false;
 let chatOnlineBusy = false;
-let chatCleanupEnabledForClient = Math.random() < 0.1;
-let lastCloudSaveAt = 0;
-let lastCloudPresenceAt = 0;
-let cloudDirtySinceAt = 0;
-let lastCloudSaveFingerprint = "";
-let cloudSaveDirty = false;
-let cloudSaveInFlight = false;
-let chatDragActief = false;
-let chatDragPointerId = null;
-let chatDragStartX = 0;
-let chatDragStartY = 0;
-let chatDragStartLeft = 0;
-let chatDragStartTop = 0;
-let chatDragHeeftBewogen = false;
-let chatSkipToggleKlik = false;
 
 const maanden = [
   "JANUARI",
@@ -276,6 +284,9 @@ const alleSkinKleuren = {
   RED: 0xff0000,
   BLUE: 0x0000ff,
   GOLDEN: 0xdc2626,
+  OBSIDIAN: 0x111827,
+  NEON: 0x22d3ee,
+  VOID: 0x7c3aed,
   JANUARI: 0xffffff,
   FEBRUARI: 0xffc0cb,
   MAART: 0xffd700,
@@ -307,6 +318,24 @@ const skinVisualOverrides = {
     emissiveIntensity: 0.34,
     specular: 0xffd6d6,
     shininess: 165,
+  },
+  OBSIDIAN: {
+    emissive: 0x04070f,
+    emissiveIntensity: 0.48,
+    specular: 0x98a2b3,
+    shininess: 120,
+  },
+  NEON: {
+    emissive: 0x0f5f66,
+    emissiveIntensity: 0.55,
+    specular: 0xd9fbff,
+    shininess: 115,
+  },
+  VOID: {
+    emissive: 0x220f53,
+    emissiveIntensity: 0.62,
+    specular: 0xe3d3ff,
+    shininess: 135,
   },
   JANUARI: {
     emissive: 0x6f6f8a,
@@ -382,6 +411,61 @@ const skinVisualOverrides = {
     shininess: 88,
   },
 };
+const SKIN_SPECIAL_EFFECTS = {
+  GOLDEN: {
+    auraColor: 0xf97316,
+    auraBase: 1.2,
+    auraPulse: 0.34,
+    pulseSpeed: 5.2,
+    ringColor: 0xffedd5,
+    ringOpacity: 0.4,
+    ringScaleBase: 1.02,
+    ringScalePulse: 0.11,
+    ringSpin: 2.8,
+    trailColor: 0xfda4af,
+    trailStep: 0.22,
+  },
+  OBSIDIAN: {
+    auraColor: 0x6b7280,
+    auraBase: 1.05,
+    auraPulse: 0.26,
+    pulseSpeed: 3.7,
+    ringColor: 0x94a3b8,
+    ringOpacity: 0.35,
+    ringScaleBase: 1.03,
+    ringScalePulse: 0.08,
+    ringSpin: 1.9,
+    trailColor: 0x9ca3af,
+    trailStep: 0.25,
+  },
+  NEON: {
+    auraColor: 0x22d3ee,
+    auraBase: 1.16,
+    auraPulse: 0.33,
+    pulseSpeed: 6,
+    ringColor: 0x67e8f9,
+    ringOpacity: 0.46,
+    ringScaleBase: 1.01,
+    ringScalePulse: 0.08,
+    ringSpin: 2.8,
+    trailColor: 0x22d3ee,
+    trailStep: 0.2,
+  },
+  VOID: {
+    auraColor: 0x7c3aed,
+    auraBase: 1.18,
+    auraPulse: 0.4,
+    pulseSpeed: 4.1,
+    ringColor: 0xa78bfa,
+    ringOpacity: 0.42,
+    ringScaleBase: 1.03,
+    ringScalePulse: 0.1,
+    ringSpin: 2.2,
+    trailColor: 0xc4b5fd,
+    trailStep: 0.23,
+  },
+};
+const MOWER_SKIN_TRAIL_MAX_POINTS = 42;
 
 const keys = {};
 let mowerBodyMaterial = null;
@@ -392,6 +476,15 @@ let mowerFerrariKit = null;
 let mowerBlueKit = null;
 let mowerBlueRotors = [];
 let mowerBlueAuraLight = null;
+let mowerSkinAuraLight = null;
+let mowerSkinRing = null;
+let mowerCannon = null;
+let mowerSkinRingMaterial = null;
+let mowerSkinTrailLine = null;
+let skinFxPulse = 0;
+const mowerSkinTrailPoints = [];
+const mowerSkinTrailLastPos = new THREE.Vector3();
+let mowerSkinTrailInitialized = false;
 let blueAuraPulse = 0;
 const normalizeGameMode = (mode) =>
   mode === "creative" ? "creative" : "classic";
@@ -411,10 +504,7 @@ const formatDisplayNameFromEmail = (email) => {
   return lokaleNaam.slice(0, 24).toUpperCase();
 };
 const getLeaderboardDisplayName = (data, fallbackId = "") => {
-  if (
-    typeof data?.accountDisplayName === "string" &&
-    data.accountDisplayName.trim()
-  ) {
+  if (typeof data?.accountDisplayName === "string" && data.accountDisplayName.trim()) {
     return data.accountDisplayName.trim().slice(0, 24);
   }
   if (typeof data?.accountEmail === "string" && data.accountEmail.trim()) {
@@ -440,9 +530,7 @@ const getVrijgespeeldeTrofeeen = () => {
   return unlocked;
 };
 const getTrofeeBeloning = (trofeeLevel) =>
-  TROFEE_BELONINGEN[
-    Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))
-  ];
+  TROFEE_BELONINGEN[Math.max(0, Math.min(TROFEE_BELONINGEN.length - 1, trofeeLevel - 1))];
 const isOneindigSpeelveldActief = () =>
   gameMode === "creative" || oneindigSpeelveldOnd;
 const getChatDisplayName = () => {
@@ -469,8 +557,7 @@ const setChatStatus = (tekst = "", kleur = "#9ca3af") => {
 };
 const setChatOnlineCount = (count) => {
   if (!chatOnlineCountEl) return;
-  const value =
-    Number.isFinite(count) && count >= 0 ? Math.max(0, Math.floor(count)) : 0;
+  const value = Number.isFinite(count) && count >= 0 ? Math.max(0, Math.floor(count)) : 0;
   chatOnlineCountEl.textContent = `Online: ${value}`;
   if (chatToggleBtnEl) {
     chatToggleBtnEl.textContent = `LIVE CHAT (${value} online)`;
@@ -508,77 +595,6 @@ const setChatOpenState = (open) => {
   chatPanel.classList.toggle("has-unread", chatHeeftOngelezen && !open);
   if (open) chatHeeftOngelezen = false;
 };
-const clampChatPanelPosition = (left, top) => {
-  if (!chatPanel) return;
-  const margin = 8;
-  const panelBreedte = chatPanel.offsetWidth || 0;
-  const panelHoogte = chatPanel.offsetHeight || 0;
-  const maxLeft = Math.max(margin, window.innerWidth - panelBreedte - margin);
-  const maxTop = Math.max(margin, window.innerHeight - panelHoogte - margin);
-  const safeLeft = Math.min(maxLeft, Math.max(margin, left));
-  const safeTop = Math.min(maxTop, Math.max(margin, top));
-  chatPanel.style.left = `${safeLeft}px`;
-  chatPanel.style.top = `${safeTop}px`;
-  chatPanel.style.right = "auto";
-  chatPanel.style.bottom = "auto";
-};
-const startChatDrag = (event) => {
-  if (!chatPanel) return;
-  if (event.button !== undefined && event.button !== 0) return;
-  const rect = chatPanel.getBoundingClientRect();
-  chatDragActief = true;
-  chatDragPointerId = event.pointerId ?? null;
-  chatDragStartX = event.clientX;
-  chatDragStartY = event.clientY;
-  chatDragStartLeft = rect.left;
-  chatDragStartTop = rect.top;
-  chatDragHeeftBewogen = false;
-  chatPanel.classList.add("is-dragging");
-  chatPanel.style.left = `${rect.left}px`;
-  chatPanel.style.top = `${rect.top}px`;
-  chatPanel.style.right = "auto";
-  chatPanel.style.bottom = "auto";
-  if (
-    typeof event.currentTarget?.setPointerCapture === "function" &&
-    event.pointerId !== undefined
-  ) {
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-  event.preventDefault();
-};
-const onChatDragMove = (event) => {
-  if (!chatDragActief) return;
-  if (
-    chatDragPointerId !== null &&
-    event.pointerId !== undefined &&
-    event.pointerId !== chatDragPointerId
-  ) {
-    return;
-  }
-  const dx = event.clientX - chatDragStartX;
-  const dy = event.clientY - chatDragStartY;
-  if (!chatDragHeeftBewogen && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
-    chatDragHeeftBewogen = true;
-  }
-  clampChatPanelPosition(chatDragStartLeft + dx, chatDragStartTop + dy);
-  event.preventDefault();
-};
-const stopChatDrag = (event) => {
-  if (!chatDragActief) return;
-  if (
-    chatDragPointerId !== null &&
-    event?.pointerId !== undefined &&
-    event.pointerId !== chatDragPointerId
-  ) {
-    return;
-  }
-  if (chatDragHeeftBewogen) {
-    chatSkipToggleKlik = true;
-  }
-  chatDragActief = false;
-  chatDragPointerId = null;
-  chatPanel?.classList.remove("is-dragging");
-};
 const stopChatSubscription = () => {
   if (!chatUnsubscribe) return;
   chatUnsubscribe();
@@ -598,9 +614,7 @@ const cleanupOudeChatBerichten = async () => {
   if (!firebaseDb || chatCleanupBusy) return;
   chatCleanupBusy = true;
   try {
-    const cutoff = Timestamp.fromMillis(
-      Date.now() - CHAT_BERICHT_MAX_LEEFTIJD_MS,
-    );
+    const cutoff = Timestamp.fromMillis(Date.now() - CHAT_BERICHT_MAX_LEEFTIJD_MS);
     const oudeBerichtenQuery = query(
       collection(firebaseDb, FIREBASE_CHAT_COLLECTION),
       where("createdAt", "<=", cutoff),
@@ -625,7 +639,7 @@ const refreshOnlineSpelers = async () => {
     const onlineQuery = query(
       collection(firebaseDb, FIREBASE_SAVE_COLLECTION),
       where("updatedAt", ">=", cutoff),
-      limit(ONLINE_SPELER_MAX_DOCS),
+      limit(2000),
     );
     const onlineSnap = await getDocs(onlineQuery);
     setChatOnlineCount(onlineSnap.size);
@@ -645,18 +659,10 @@ const startChatMaintenance = () => {
     setChatOnlineCount(0);
     return;
   }
-  if (chatCleanupEnabledForClient) {
-    cleanupOudeChatBerichten();
-    chatCleanupIntervalId = setInterval(
-      cleanupOudeChatBerichten,
-      CHAT_CLEANUP_INTERVAL_MS,
-    );
-  }
+  cleanupOudeChatBerichten();
   refreshOnlineSpelers();
-  chatOnlinePollIntervalId = setInterval(
-    refreshOnlineSpelers,
-    ONLINE_SPELER_REFRESH_MS,
-  );
+  chatCleanupIntervalId = setInterval(cleanupOudeChatBerichten, CHAT_CLEANUP_INTERVAL_MS);
+  chatOnlinePollIntervalId = setInterval(refreshOnlineSpelers, ONLINE_SPELER_REFRESH_MS);
 };
 const subscribeChat = () => {
   if (!firebaseDb) return;
@@ -673,28 +679,33 @@ const subscribeChat = () => {
   );
   chatUnsubscribe = onSnapshot(
     chatQuery,
-    (snapshot) => {
+    async (snapshot) => {
       const cutoffMs = Date.now() - CHAT_BERICHT_MAX_LEEFTIJD_MS;
+      const teVerwijderen = [];
       const berichten = snapshot.docs
         .filter((d) => {
           const data = d.data();
-          if (!data?.createdAt || typeof data.createdAt.toDate !== "function")
-            return false;
-          return data.createdAt.toDate().getTime() >= cutoffMs;
+          if (!data?.createdAt || typeof data.createdAt.toDate !== "function") return false;
+          const isNieuwGenoeg = data.createdAt.toDate().getTime() >= cutoffMs;
+          if (!isNieuwGenoeg) teVerwijderen.push(d.ref);
+          return isNieuwGenoeg;
         })
         .map((d) => d.data())
         .reverse();
+      if (teVerwijderen.length) {
+        try {
+          await Promise.all(teVerwijderen.map((ref) => deleteDoc(ref)));
+        } catch (err) {
+          if (err?.code !== "permission-denied") {
+            console.error("Oude chatberichten verwijderen mislukt:", err);
+          }
+        }
+      }
       renderChatBerichten(berichten);
-      if (
-        !chatIsOpen &&
-        snapshot.docChanges().some((c) => c.type === "added")
-      ) {
+      if (!chatIsOpen && snapshot.docChanges().some((c) => c.type === "added")) {
         chatHeeftOngelezen = true;
       }
-      chatPanel?.classList.toggle(
-        "has-unread",
-        chatHeeftOngelezen && !chatIsOpen,
-      );
+      chatPanel?.classList.toggle("has-unread", chatHeeftOngelezen && !chatIsOpen);
       setChatStatus("Live", "#22c55e");
     },
     (err) => {
@@ -709,7 +720,7 @@ const subscribeChat = () => {
     },
   );
 };
-window.sendChatMessage = async () => {
+window.sendChatMessage = async (customText = null) => {
   if (!firebaseDb) {
     setChatStatus("Firebase niet klaar", "#f87171");
     return;
@@ -718,7 +729,7 @@ window.sendChatMessage = async () => {
     setChatStatus("Log in om te chatten", "#f59e0b");
     return;
   }
-  const raw = chatInputEl?.value ?? "";
+  const raw = customText ?? (chatInputEl?.value ?? "");
   const text = raw.trim();
   if (!text) return;
   const safeText = text.slice(0, CHAT_MAX_BERICHT_LENGTE);
@@ -729,7 +740,7 @@ window.sendChatMessage = async () => {
       uid: String(ingelogdeGebruiker.uid || ""),
       createdAt: serverTimestamp(),
     });
-    chatInputEl.value = "";
+    if (!customText && chatInputEl) chatInputEl.value = "";
     setChatStatus("Verzonden", "#22c55e");
   } catch (err) {
     console.error("Bericht verzenden mislukt:", err);
@@ -738,10 +749,7 @@ window.sendChatMessage = async () => {
     } else if (err?.code === "unavailable") {
       setChatStatus("Chat server offline", "#f87171");
     } else {
-      setChatStatus(
-        `Verzenden mislukt (${err?.code || "onbekend"})`,
-        "#f87171",
-      );
+      setChatStatus(`Verzenden mislukt (${err?.code || "onbekend"})`, "#f87171");
     }
   }
 };
@@ -775,20 +783,8 @@ const buildChatUi = () => {
   chatOnlineCountEl = document.getElementById("chatOnlineCount");
   chatStatusEl = document.getElementById("chatStatus");
   chatToggleBtnEl = document.getElementById("chatToggleBtn");
-  chatHeaderEl = chatPanel.querySelector(".chat-header");
 
-  chatToggleBtnEl?.addEventListener("click", () => {
-    if (chatSkipToggleKlik) {
-      chatSkipToggleKlik = false;
-      return;
-    }
-    setChatOpenState(!chatIsOpen);
-  });
-  chatToggleBtnEl?.addEventListener("pointerdown", startChatDrag);
-  chatHeaderEl?.addEventListener("pointerdown", startChatDrag);
-  document.addEventListener("pointermove", onChatDragMove, { passive: false });
-  document.addEventListener("pointerup", stopChatDrag);
-  document.addEventListener("pointercancel", stopChatDrag);
+  chatToggleBtnEl?.addEventListener("click", () => setChatOpenState(!chatIsOpen));
   chatSendBtnEl?.addEventListener("click", () => window.sendChatMessage());
   chatInputEl?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -864,6 +860,11 @@ overlay.style.cssText =
   "position:fixed; top:0; left:-100%; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:10000; transition:0.3s; display:flex; align-items:center; justify-content:center; pointer-events:none; color:white; font-family:Impact;";
 document.body.appendChild(overlay);
 
+const damageOverlay = document.createElement("div");
+damageOverlay.style.cssText =
+  "position:fixed; top:0; left:0; width:100%; height:100%; background:red; opacity:0; pointer-events:none; z-index:9998; transition:opacity 0.1s;";
+document.body.appendChild(damageOverlay);
+
 // Vergroot de klikzone van alle knoppen zonder visuele layout-wijziging.
 const globalButtonHitboxStyle = document.createElement("style");
 globalButtonHitboxStyle.textContent = `
@@ -882,8 +883,7 @@ document.head.appendChild(globalButtonHitboxStyle);
 document.addEventListener(
   "click",
   (event) => {
-    const btn =
-      event.target instanceof Element ? event.target.closest("button") : null;
+    const btn = event.target instanceof Element ? event.target.closest("button") : null;
     if (!btn || btn.disabled) return;
     if (typeof btn.onclick === "function") return;
     const inlineAction = btn.getAttribute("onclick");
@@ -1044,6 +1044,11 @@ window.setCreativeSpeed = (value) => {
   if (el) el.innerText = creativeSpeed.toFixed(2);
 };
 
+window.triggerDamageFlash = () => {
+  damageOverlay.style.opacity = "0.4";
+  setTimeout(() => (damageOverlay.style.opacity = "0"), 150);
+};
+
 window.applySkinVisual = (skinNaam) => {
   if (!mowerBodyMaterial) return;
   const basisKleur = alleSkinKleuren[skinNaam] ?? 0xff0000;
@@ -1056,7 +1061,8 @@ window.applySkinVisual = (skinNaam) => {
 
   const color = override.color ?? basisKleur;
   const emissive = override.emissive ?? (isRed ? 0x220000 : 0x1f1f1f);
-  const emissiveIntensity = override.emissiveIntensity ?? (isRed ? 0.12 : 0.3);
+  const emissiveIntensity =
+    override.emissiveIntensity ?? (isRed ? 0.12 : 0.3);
   const specular = override.specular ?? (isRed ? 0x333333 : 0xcfcfcf);
   const shininess = override.shininess ?? (isRed ? 22 : 70);
 
@@ -1089,6 +1095,30 @@ window.applySkinVisual = (skinNaam) => {
     : emissiveIntensity;
   mowerBodyMaterial.specular.set(specular);
   mowerBodyMaterial.shininess = isBlue ? shininess + 22 : shininess;
+
+  const fx = SKIN_SPECIAL_EFFECTS[skinNaam] || null;
+  if (mowerSkinAuraLight) {
+    mowerSkinAuraLight.visible = Boolean(fx);
+    if (fx) {
+      mowerSkinAuraLight.color.set(fx.auraColor);
+      mowerSkinAuraLight.intensity = fx.auraBase;
+    }
+  }
+  if (mowerSkinRing) mowerSkinRing.visible = Boolean(fx);
+  if (mowerSkinRingMaterial && fx) {
+    mowerSkinRingMaterial.color.set(fx.ringColor);
+    mowerSkinRingMaterial.opacity = fx.ringOpacity;
+  }
+  if (mowerSkinTrailLine) {
+    mowerSkinTrailLine.visible = Boolean(fx);
+    if (fx && mowerSkinTrailLine.material?.color) {
+      mowerSkinTrailLine.material.color.set(fx.trailColor);
+    }
+    mowerSkinTrailPoints.length = 0;
+    mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+    mowerSkinTrailInitialized = false;
+  }
+  skinFxPulse = 0;
 };
 
 window.maakBasicSnapshot = () => ({
@@ -1133,9 +1163,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   if (!snapshot) return false;
   geld = snapshot.geld;
   totaalVerdiend = snapshot.totaalVerdiend;
-  totaalVerdiendVoorTrofeeen = Number.isFinite(
-    snapshot.totaalVerdiendVoorTrofeeen,
-  )
+  totaalVerdiendVoorTrofeeen = Number.isFinite(snapshot.totaalVerdiendVoorTrofeeen)
     ? snapshot.totaalVerdiendVoorTrofeeen
     : 0;
   totaalGemaaid = snapshot.totaalGemaaid;
@@ -1144,10 +1172,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   geclaimdeTrofeeen = Number.isFinite(snapshot.geclaimdeTrofeeen)
     ? snapshot.geclaimdeTrofeeen
     : 0;
-  geclaimdeTrofeeen = Math.max(
-    0,
-    Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen),
-  );
+  geclaimdeTrofeeen = Math.max(0, Math.min(TROFEE_DREMPELS.length, geclaimdeTrofeeen));
   grasWaarde = snapshot.grasWaarde;
   huidigeSnelheid = snapshot.huidigeSnelheid;
   huidigMowerRadius = snapshot.huidigMowerRadius;
@@ -1162,9 +1187,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   eventMaandKey = snapshot.eventMaandKey || getHuidigeEventMaandKey();
   spelerResetMaandKey =
     snapshot.spelerResetMaandKey || getHuidigeEventMaandKey();
-  actieveOpdracht = snapshot.actieveOpdracht
-    ? { ...snapshot.actieveOpdracht }
-    : null;
+  actieveOpdracht = snapshot.actieveOpdracht ? { ...snapshot.actieveOpdracht } : null;
   eventOpdracht = snapshot.eventOpdracht ? { ...snapshot.eventOpdracht } : null;
   rewardKlaar = snapshot.rewardKlaar;
   eventRewardKlaar = snapshot.eventRewardKlaar;
@@ -1172,9 +1195,7 @@ window.herstelBasicSnapshot = (snapshot) => {
   ontgrendeldeSkins = [...snapshot.ontgrendeldeSkins];
   shopUpgradeLevel = snapshot.shopUpgradeLevel;
   shopUpgradePrijs = SHOP_UPGRADE_VASTE_KOST;
-  rebirtCount = Number.isFinite(snapshot.rebirtCount)
-    ? snapshot.rebirtCount
-    : 0;
+  rebirtCount = Number.isFinite(snapshot.rebirtCount) ? snapshot.rebirtCount : 0;
   shopUpgradeLevel = 0;
   verdienMultiplier = Math.pow(REBIRT_BONUS_STEP, rebirtCount);
   radDraaiCount = snapshot.radDraaiCount;
@@ -1197,13 +1218,9 @@ window.resetClassicGrassField = () => {
   for (let x = 0; x < grassPerSide; x++) {
     for (let z = 0; z < grassPerSide; z++) {
       const gx =
-        -MAP_HALF_SIZE +
-        x * GRASS_SPACING +
-        Math.random() * GRASS_POSITION_JITTER;
+        -MAP_HALF_SIZE + x * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
       const gz =
-        -MAP_HALF_SIZE +
-        z * GRASS_SPACING +
-        Math.random() * GRASS_POSITION_JITTER;
+        -MAP_HALF_SIZE + z * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
       const g = grassData[i];
       g.x = gx;
       g.z = gz;
@@ -1309,18 +1326,12 @@ window.openTrofee = () => {
     const drempel = TROFEE_DREMPELS[i - 1];
     const vorigeDrempel = i === 1 ? 0 : TROFEE_DREMPELS[i - 2];
     const stapDoel = Math.max(1, drempel - vorigeDrempel);
-    const stapVoortgang = Math.max(
-      0,
-      Math.min(stapDoel, progress - vorigeDrempel),
-    );
-    const stapPct = geclaimd
-      ? 100
-      : Math.max(0, Math.min(100, (stapVoortgang / stapDoel) * 100));
+    const stapVoortgang = Math.max(0, Math.min(stapDoel, progress - vorigeDrempel));
+    const stapPct = geclaimd ? 100 : Math.max(0, Math.min(100, (stapVoortgang / stapDoel) * 100));
     const belBedrag = getTrofeeBeloning(i);
-    const bel =
-      i === 10
-        ? `$${belBedrag.toLocaleString()} + BLUE SKIN`
-        : `$${belBedrag.toLocaleString()}`;
+    const bel = i === 10
+      ? `$${belBedrag.toLocaleString()} + BLUE SKIN`
+      : `$${belBedrag.toLocaleString()}`;
     h += `<div style="padding:20px; margin:10px; background:#222; border-radius:15px; display:flex; justify-content:space-between; align-items:center; border:3px solid ${geclaimd ? "#2ecc71" : kan ? "#f1c40f" : "#444"};">
             <div style="text-align:left; min-width:320px;">
               <div style="font-size:24px;">TROFEE ${i}</div>
@@ -1374,12 +1385,8 @@ window.openLeaderboard = async () => {
     });
     spelers.sort((a, b) => b.totaalVerdiend - a.totaalVerdiend);
     const topTien = spelers.slice(0, 10);
-    const mijnUid = ingelogdeGebruiker?.uid
-      ? String(ingelogdeGebruiker.uid)
-      : "";
-    const mijnIndex = mijnUid
-      ? spelers.findIndex((speler) => speler.uid === mijnUid)
-      : -1;
+    const mijnUid = ingelogdeGebruiker?.uid ? String(ingelogdeGebruiker.uid) : "";
+    const mijnIndex = mijnUid ? spelers.findIndex((speler) => speler.uid === mijnUid) : -1;
     const mijnPositie =
       mijnIndex >= 0
         ? {
@@ -1392,10 +1399,7 @@ window.openLeaderboard = async () => {
     const lijstHtml = topTien.length
       ? topTien
           .map(
-            (
-              speler,
-              index,
-            ) => `<div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:${index < 3 ? "#1b2631" : "#1f2937"}; border:2px solid ${index < 3 ? "#f1c40f" : "#334155"};">
+            (speler, index) => `<div style="display:grid; grid-template-columns:110px 1fr 240px; gap:10px; align-items:center; text-align:left; padding:14px; margin:8px 0; border-radius:12px; background:${index < 3 ? "#1b2631" : "#1f2937"}; border:2px solid ${index < 3 ? "#f1c40f" : "#334155"};">
               <div style="font-size:24px; color:${index < 3 ? "#f1c40f" : "#93c5fd"};">#${index + 1}</div>
               <div style="font-size:22px; color:white; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(speler.naam)}</div>
               <div style="font-size:22px; color:#2ecc71; text-align:right;">$${speler.totaalVerdiend.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
@@ -1557,10 +1561,20 @@ window.openShop = () => {
   overlay.style.pointerEvents = "auto";
   if (!Number.isFinite(geld) || geld < 0) geld = 0;
   if (!Number.isFinite(diamanten) || diamanten < 0) diamanten = 0;
-  const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(
-    2,
-  );
+  const volgendeRebirtMulti = (verdienMultiplier * REBIRT_BONUS_STEP).toFixed(2);
   const radKost = window.getRadKost();
+  const skinShopHtml = DIAMANT_SKINS_SHOP.map((skin) => {
+    const gekocht = ontgrendeldeSkins.includes(skin.id);
+    const kanKopen = diamanten >= skin.prijs;
+    const knopTekst = gekocht ? "GEKOCHT" : `KOOP (${skin.prijs}D)`;
+    const knopKleur = gekocht ? "#16a34a" : kanKopen ? "#7c3aed" : "#555";
+    const cursor = gekocht || kanKopen ? "pointer" : "default";
+    return `<div style="padding:12px; background:#111827; border:2px solid #374151; border-radius:12px;">
+      <div style="font-size:22px; color:${skin.kleur};">${skin.naam}</div>
+      <div style="font-size:16px; color:#cbd5e1; margin:4px 0 10px 0;">Special FX skin</div>
+      <button onclick="window.koopSkinMetDiamanten('${skin.id}')" ${gekocht ? "disabled" : ""} style="width:100%; padding:10px; background:${knopKleur}; color:white; border:2px solid white; border-radius:10px; font-family:Impact; font-size:18px; cursor:${cursor};">${knopTekst}</button>
+    </div>`;
+  }).join("");
   overlay.innerHTML = `<div style="background:#111; padding:45px; border:8px solid #5dade2; border-radius:30px; text-align:center; min-width:560px; max-width:92vw; max-height:85vh; overflow-y:auto; overflow-x:hidden;">
         <h1 style="color:#85c1e9; font-size:60px; margin:0 0 10px 0;">&#128142; SHOP</h1>
         <p style="font-size:24px; margin:8px 0; color:#2ecc71;">Geld: $${geld.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
@@ -1576,12 +1590,43 @@ window.openShop = () => {
           <button onclick="window.draaiRad()" style="width:100%; padding:16px; background:${diamanten >= radKost ? "#8e44ad" : "#555"}; color:white; border:3px solid white; border-radius:12px; cursor:${diamanten >= radKost ? "pointer" : "default"}; font-family:Impact; font-size:24px;">DRAAI RAD (${radKost}D)</button>
           <p style="font-size:18px; color:#d7bde2; margin:10px 0 0 0;">Mogelijke rewards: Geld, Diamanten, Radius/Speed/Value upgrade</p>
         </div>
+        <div style="margin-top:22px; padding:16px; background:#1f1236; border:3px solid #7c3aed; border-radius:14px;">
+          <div style="font-size:26px; color:#c4b5fd; margin-bottom:10px;"> DIAMANT SKINS</div>
+          <p style="font-size:18px; margin:0 0 12px 0; color:#ddd6fe;">Koop premium skins met speciale effecten.</p>
+          <div style="display:grid; grid-template-columns:repeat(2, minmax(220px, 1fr)); gap:10px;">
+            ${skinShopHtml}
+          </div>
+        </div>
         <button onclick="window.sluit()" style="margin-top:16px; padding:14px 50px; background:#5dade2; color:white; border:none; border-radius:12px; font-family:Impact; font-size:24px; cursor:pointer;">SLUITEN</button>
     </div>`;
 };
 
 window.koopDiamant = () => {
   alert("Diamanten kopen staat uit. Verdien diamanten via Grass Pass.");
+};
+window.koopSkinMetDiamanten = (skinId) => {
+  const id = String(skinId || "").toUpperCase();
+  const skinDef = DIAMANT_SKINS_SHOP.find((skin) => skin.id === id);
+  if (!skinDef) {
+    alert("Deze skin bestaat niet.");
+    return;
+  }
+  if (ontgrendeldeSkins.includes(id)) {
+    alert(`${skinDef.naam} is al gekocht.`);
+    return;
+  }
+  if (diamanten < skinDef.prijs) {
+    alert(`Je hebt ${skinDef.prijs} diamanten nodig voor ${skinDef.naam}.`);
+    return;
+  }
+  diamanten -= skinDef.prijs;
+  ontgrendeldeSkins.push(id);
+  huidigeSkin = id;
+  window.applySkinVisual(huidigeSkin);
+  window.updateUI();
+  window.save(true);
+  alert(`${skinDef.naam} gekocht en geactiveerd!`);
+  window.openShop();
 };
 
 window.koopRebirt = () => {
@@ -1816,7 +1861,7 @@ window.openSkins = () => {
   overlay.style.left = "0";
   overlay.style.pointerEvents = "auto";
   let h = `<div style="background:#111; padding:40px; border:8px solid #3498db; border-radius:30px; text-align:center; max-width:80%; max-height:80vh; overflow-y:auto;"><h1 style="color:#3498db; font-size:50px; margin-bottom:20px;"> SKINS</h1><div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
-  ["STARTER", "RED", "BLUE", "GOLDEN", ...maanden].forEach((s) => {
+  ["STARTER", "RED", "BLUE", "GOLDEN", ...DIAMANT_SKIN_IDS, ...maanden].forEach((s) => {
     const ok = gameMode === "creative" || ontgrendeldeSkins.includes(s),
       cur = huidigeSkin === s;
     h += `<button class="skinSelectBtn" data-skin="${s}" data-unlocked="${ok ? "1" : "0"}" style="padding:20px; background:${ok ? (cur ? "#2ecc71" : "#333") : "#111"}; color:${ok ? "white" : "#555"}; font-family:Impact; border:${cur ? "4px solid white" : "2px solid #444"}; border-radius:15px; cursor:${ok ? "pointer" : "default"}; font-size:18px;" ${ok ? "" : "disabled"}>${ok ? s : "LOCKED"}</button>`;
@@ -2011,14 +2056,9 @@ window.applySaveData = (d) => {
   eventLevel = Number.isFinite(d.eventLevel) ? d.eventLevel : 1;
   huidigeSkin = d.huidigeSkin || "STARTER";
   ontgrendeldeSkins = Array.isArray(d.ontgrendeldeSkins)
-    ? [
-        ...new Set(
-          d.ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()),
-        ),
-      ]
+    ? [...new Set(d.ontgrendeldeSkins.map((skin) => String(skin).toUpperCase()))]
     : ["STARTER"];
-  if (!ontgrendeldeSkins.includes("STARTER"))
-    ontgrendeldeSkins.unshift("STARTER");
+  if (!ontgrendeldeSkins.includes("STARTER")) ontgrendeldeSkins.unshift("STARTER");
   if (!ontgrendeldeSkins.includes(huidigeSkin)) huidigeSkin = "STARTER";
   eventMaandKey =
     typeof d.eventMaandKey === "string" && /^\d{4}-\d{2}$/.test(d.eventMaandKey)
@@ -2078,23 +2118,6 @@ window.loadCloudSave = async () => {
   }
 };
 
-const getCloudSaveFingerprint = (data) => {
-  try {
-    return JSON.stringify(data);
-  } catch {
-    return "";
-  }
-};
-
-const resetCloudSyncState = () => {
-  lastCloudSaveAt = 0;
-  lastCloudPresenceAt = 0;
-  cloudDirtySinceAt = 0;
-  lastCloudSaveFingerprint = "";
-  cloudSaveDirty = false;
-  cloudSaveInFlight = false;
-};
-
 window.initFirebase = () => {
   try {
     firebaseApp = initializeApp(firebaseConfig);
@@ -2105,12 +2128,9 @@ window.initFirebase = () => {
     onAuthStateChanged(firebaseAuth, async (user) => {
       const vorigeGebruiker = ingelogdeGebruiker;
       ingelogdeGebruiker = user || null;
-      resetCloudSyncState();
       if (ingelogdeGebruiker) {
         const cloudGeladen = await window.loadCloudSave();
-        if (!cloudGeladen) await window.save(true, { forceCloud: true });
-        const huidigeData = window.getSaveData();
-        lastCloudSaveFingerprint = getCloudSaveFingerprint(huidigeData);
+        if (!cloudGeladen) await window.save(true);
       } else if (vorigeGebruiker) {
         let backup = localStateVoorLogin;
         if (!backup) {
@@ -2136,7 +2156,6 @@ window.initFirebase = () => {
       refreshChatForAuthState();
       subscribeChat();
       startChatMaintenance();
-      if (ingelogdeGebruiker) window.save(true, { forcePresence: true });
     });
   } catch (err) {
     console.error("Firebase init mislukt:", err);
@@ -2151,15 +2170,12 @@ window.toggleGoogleLogin = async () => {
   }
   try {
     if (ingelogdeGebruiker) {
-      await window.save(true, { forceCloud: true });
+      await window.save(true);
       await signOut(firebaseAuth);
       return;
     }
     localStateVoorLogin = window.getSaveData();
-    localStorage.setItem(
-      PRELOGIN_BACKUP_KEY,
-      JSON.stringify(localStateVoorLogin),
-    );
+    localStorage.setItem(PRELOGIN_BACKUP_KEY, JSON.stringify(localStateVoorLogin));
     await signInWithPopup(firebaseAuth, googleProvider);
   } catch (err) {
     console.error("Google login fout:", err);
@@ -2167,9 +2183,7 @@ window.toggleGoogleLogin = async () => {
   }
 };
 
-window.save = async (silent = false, options = {}) => {
-  const forceCloud = Boolean(options?.forceCloud);
-  const forcePresence = Boolean(options?.forcePresence);
+window.save = async (silent = false) => {
   const moetLokaalOpslaan = autoSaveOnd || silent;
   const moetCloudOpslaan = Boolean(ingelogdeGebruiker && firebaseDb);
   if (!moetLokaalOpslaan && !moetCloudOpslaan) return;
@@ -2178,59 +2192,19 @@ window.save = async (silent = false, options = {}) => {
   localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(data));
 
   if (moetCloudOpslaan) {
-    const nu = Date.now();
-    const fingerprint = getCloudSaveFingerprint(data);
-    if (fingerprint && fingerprint !== lastCloudSaveFingerprint) {
-      lastCloudSaveFingerprint = fingerprint;
-      cloudSaveDirty = true;
-      if (!cloudDirtySinceAt) cloudDirtySinceAt = nu;
-    }
-    const kanDataSchrijven =
-      forceCloud ||
-      (cloudSaveDirty &&
-        (nu - lastCloudSaveAt >= CLOUD_SAVE_MIN_INTERVAL_MS ||
-          nu - cloudDirtySinceAt >= CLOUD_SAVE_MAX_DEFER_MS));
-    const kanPresenceSchrijven =
-      forcePresence ||
-      nu - lastCloudPresenceAt >= CLOUD_PRESENCE_WRITE_INTERVAL_MS;
-    if (!kanDataSchrijven && !kanPresenceSchrijven) {
-      if (autoSaveOnd) {
-        const t = document.getElementById("saveToast");
-        if (t) {
-          t.style.opacity = 1;
-          setTimeout(() => (t.style.opacity = 0), 1500);
-        }
-      }
-      return;
-    }
-    if (cloudSaveInFlight) return;
-    cloudSaveInFlight = true;
     try {
-      const payload = {
-        updatedAt: serverTimestamp(),
-        accountEmail: ingelogdeGebruiker.email ?? null,
-        accountDisplayName: ingelogdeGebruiker.displayName ?? null,
-      };
-      if (kanDataSchrijven) {
-        Object.assign(payload, data);
-      }
       await setDoc(
         getSaveDocRef(ingelogdeGebruiker.uid),
-        payload,
+        {
+          ...data,
+          accountEmail: ingelogdeGebruiker.email ?? null,
+          accountDisplayName: ingelogdeGebruiker.displayName ?? null,
+          updatedAt: serverTimestamp(),
+        },
         { merge: true },
       );
-      if (kanDataSchrijven) {
-        cloudSaveDirty = false;
-        cloudDirtySinceAt = 0;
-        lastCloudSaveAt = nu;
-      }
-      if (kanPresenceSchrijven) {
-        lastCloudPresenceAt = nu;
-      }
     } catch (err) {
       console.error("Cloud save mislukt:", err);
-    } finally {
-      cloudSaveInFlight = false;
     }
   }
 
@@ -2281,9 +2255,7 @@ window.openResetConfirm = () => {
 
 window.openSettings = () => {
   const accountNaam = getAccountLabel();
-  const accountKnopTekst = ingelogdeGebruiker
-    ? "UITLOGGEN"
-    : "INLOGGEN MET GOOGLE";
+  const accountKnopTekst = ingelogdeGebruiker ? "UITLOGGEN" : "INLOGGEN MET GOOGLE";
   const accountKnopKleur = ingelogdeGebruiker ? "#e67e22" : "#4285f4";
   const actieveMap = getMapById(huidigeMapId);
   overlay.style.left = "0";
@@ -2306,7 +2278,7 @@ window.selectMap = async (mapId) => {
   huidigeMapId = normalizeMapId(mapId);
   window.applyMapTheme();
   window.updateUI();
-  await window.save(true, { forceCloud: true });
+  await window.save(true);
   window.openMapSelect();
 };
 
@@ -2366,7 +2338,7 @@ window.openCheat = () => {
 
   gebruikteRedeemCodes.push(c);
   window.updateUI();
-  window.save(true, { forceCloud: true });
+  window.save(true);
 };
 
 window.koop = (t) => {
@@ -2749,12 +2721,55 @@ mowerBlueKit.rotation.y = Math.PI;
 mowerBlueKit.visible = false;
 mowerDetailedModel.add(mowerBlueKit);
 
+mowerCannon = new THREE.Group();
+const cannonBase = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.3, 16), new THREE.MeshLambertMaterial({color: 0x111111}));
+const cannonBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.2, 16), new THREE.MeshLambertMaterial({color: 0x222222}));
+cannonBarrel.rotation.x = Math.PI / 2;
+cannonBarrel.position.set(0, 0.15, 0.4);
+mowerCannon.add(cannonBase);
+mowerCannon.add(cannonBarrel);
+mowerCannon.position.set(0, 1.1, 0);
+mowerCannon.visible = false;
+mower.add(mowerCannon);
+
 mower.add(mowerDetailedModel);
 
 mowerBlueAuraLight = new THREE.PointLight(0x4aa3ff, 1.1, 8.5, 2);
 mowerBlueAuraLight.position.set(0, 0.8, 0.2);
 mowerBlueAuraLight.visible = false;
 mower.add(mowerBlueAuraLight);
+
+mowerSkinAuraLight = new THREE.PointLight(0xffffff, 1.1, 9.5, 2);
+mowerSkinAuraLight.position.set(0, 0.62, -0.05);
+mowerSkinAuraLight.visible = false;
+mower.add(mowerSkinAuraLight);
+
+mowerSkinRingMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.35,
+});
+mowerSkinRing = new THREE.Mesh(
+  new THREE.TorusGeometry(0.9, 0.06, 10, 34),
+  mowerSkinRingMaterial,
+);
+mowerSkinRing.rotation.x = Math.PI / 2;
+mowerSkinRing.position.set(0, 0.12, 0.1);
+mowerSkinRing.visible = false;
+mower.add(mowerSkinRing);
+
+mowerSkinTrailLine = new THREE.Line(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({
+    color: 0x93c5fd,
+    transparent: true,
+    opacity: 0.75,
+  }),
+);
+mowerSkinTrailLine.visible = false;
+mowerSkinTrailLine.frustumCulled = false;
+mowerSkinTrailLine.renderOrder = 2;
+scene.add(mowerSkinTrailLine);
 
 mower.position.set(0, 0, 0);
 scene.add(mower, new THREE.AmbientLight(0x404040));
@@ -2835,21 +2850,111 @@ grassMesh.frustumCulled = false;
 grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(grassMesh);
 
+const themeObjectsGroup = new THREE.Group();
+scene.add(themeObjectsGroup);
+const activeThemeEntities = [];
+const activeProjectiles = [];
+let cannonYaw = 0;
+let lastShotTime = 0;
+let playerHealth = 100;
+
+function createHellCar() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 2.2), new THREE.MeshLambertMaterial({color: 0x550000}));
+  body.position.y = 0.35;
+  const eyes = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.15, 0.1), new THREE.MeshBasicMaterial({color: 0xff0000}));
+  eyes.position.set(0, 0.5, 1.1);
+  g.add(body); g.add(eyes);
+  return g;
+}
+function createCactus() {
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.8, 8), new THREE.MeshLambertMaterial({color: 0x2e8b57}));
+  m.position.y = 0.9;
+  g.add(m);
+  return g;
+}
+function createSnowman() {
+  const g = new THREE.Group();
+  const b = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), new THREE.MeshLambertMaterial({color: 0xffffff}));
+  b.position.y = 0.5;
+  const t = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), new THREE.MeshLambertMaterial({color: 0xffffff}));
+  t.position.y = 1.2;
+  g.add(b); g.add(t);
+  return g;
+}
+function createNeonPillar() {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2.5, 0.4), new THREE.MeshBasicMaterial({color: 0x00ffff}));
+  m.position.y = 1.25;
+  return m;
+}
+function createRock() {
+  const m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7), new THREE.MeshLambertMaterial({color: 0x444444}));
+  m.position.y = 0.5;
+  return m;
+}
+
+window.spawnThemeObjects = () => {
+  while(themeObjectsGroup.children.length > 0) themeObjectsGroup.remove(themeObjectsGroup.children[0]);
+  activeThemeEntities.length = 0;
+  activeProjectiles.length = 0;
+  mowerCannon.visible = false;
+
+  if (huidigeMapId === "CLASSIC") return;
+
+  if (huidigeMapId === "HELL") {
+    playerHealth = 100;
+    mowerCannon.visible = true;
+    for(let i=0; i<12; i++) {
+      const car = createHellCar();
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 25 + Math.random() * 40;
+      car.position.set(Math.sin(angle)*dist, 0, Math.cos(angle)*dist);
+      themeObjectsGroup.add(car);
+      activeThemeEntities.push({ mesh: car, type: 'hellcar', speed: 2.8 + Math.random() * 1.5 });
+    }
+    return;
+  }
+
+  const count = 30;
+  for(let i=0; i<count; i++) {
+    let obj = null;
+    if (huidigeMapId === "DESERT") obj = createCactus();
+    else if (huidigeMapId === "SNOW") obj = createSnowman();
+    else if (huidigeMapId === "NEON_CITY") obj = createNeonPillar();
+    else if (huidigeMapId === "VOLCANO") obj = createRock();
+    
+    if(obj) {
+      obj.position.set((Math.random()-0.5)*130, 0, (Math.random()-0.5)*130);
+      themeObjectsGroup.add(obj);
+    }
+  }
+};
+
+window.shootCannon = () => {
+  const pGeo = new THREE.SphereGeometry(0.25, 8, 8);
+  const pMat = new THREE.MeshBasicMaterial({color: 0xffaa00});
+  const mesh = new THREE.Mesh(pGeo, pMat);
+  
+  const worldPos = new THREE.Vector3();
+  mowerCannon.getWorldPosition(worldPos);
+  worldPos.y += 0.2;
+  mesh.position.copy(worldPos);
+
+  const quat = new THREE.Quaternion();
+  mowerCannon.getWorldQuaternion(quat);
+  const v = new THREE.Vector3(0, 0, 1).applyQuaternion(quat).normalize().multiplyScalar(20);
+  
+  themeObjectsGroup.add(mesh);
+  activeProjectiles.push({ mesh: mesh, velocity: v, life: 2.5 });
+};
+
 const applyMapTheme = () => {
   const map = getMapById(huidigeMapId);
-  const skyColor =
-    lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
+  const skyColor = lichtKleur === "hemelsblauw" ? 0x87ceeb : Number(map.sky ?? 0x222222);
   scene.background = new THREE.Color(skyColor);
-  if (
-    map.fog &&
-    Number.isFinite(map.fog.near) &&
-    Number.isFinite(map.fog.far)
-  ) {
-    scene.fog = new THREE.Fog(
-      Number(map.fog.color ?? skyColor),
-      map.fog.near,
-      map.fog.far,
-    );
+  if (map.fog && Number.isFinite(map.fog.near) && Number.isFinite(map.fog.far)) {
+    scene.fog = new THREE.Fog(Number(map.fog.color ?? skyColor), map.fog.near, map.fog.far);
   } else {
     scene.fog = null;
   }
@@ -2859,6 +2964,7 @@ const applyMapTheme = () => {
   if (grassMaterial.color) {
     grassMaterial.color.set(Number(map.grass ?? 0x008000));
   }
+  window.spawnThemeObjects();
 };
 window.applyMapTheme = applyMapTheme;
 
@@ -2882,13 +2988,9 @@ let grassIndex = 0;
 for (let x = 0; x < grassPerSide; x++) {
   for (let z = 0; z < grassPerSide; z++) {
     const gx =
-      -MAP_HALF_SIZE +
-      x * GRASS_SPACING +
-      Math.random() * GRASS_POSITION_JITTER;
+      -MAP_HALF_SIZE + x * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
     const gz =
-      -MAP_HALF_SIZE +
-      z * GRASS_SPACING +
-      Math.random() * GRASS_POSITION_JITTER;
+      -MAP_HALF_SIZE + z * GRASS_SPACING + Math.random() * GRASS_POSITION_JITTER;
     grassData[grassIndex] = {
       x: gx,
       z: gz,
@@ -2941,17 +3043,8 @@ window.onkeyup = (e) => {
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(
-    Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO),
-  );
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (chatPanel?.style.left && chatPanel?.style.top) {
-    const huidigeLeft = Number.parseFloat(chatPanel.style.left);
-    const huidigeTop = Number.parseFloat(chatPanel.style.top);
-    if (Number.isFinite(huidigeLeft) && Number.isFinite(huidigeTop)) {
-      clampChatPanelPosition(huidigeLeft, huidigeTop);
-    }
-  }
 });
 
 function cutGrassAtIndex(i, now) {
@@ -3070,6 +3163,46 @@ function updateFpsMeter() {
   if (fpsEl) fpsEl.innerText = `FPS: ${fps}`;
 }
 
+function updateMowerSkinFx(deltaSec, mowerIsMoving) {
+  const fx = SKIN_SPECIAL_EFFECTS[huidigeSkin];
+  if (!fx) return;
+  skinFxPulse += deltaSec * fx.pulseSpeed;
+  const pulse01 = 0.5 + Math.sin(skinFxPulse) * 0.5;
+  if (mowerSkinAuraLight && mowerSkinAuraLight.visible) {
+    mowerSkinAuraLight.intensity = fx.auraBase + pulse01 * fx.auraPulse;
+  }
+  if (mowerSkinRing && mowerSkinRing.visible) {
+    const ringScale = fx.ringScaleBase + pulse01 * fx.ringScalePulse;
+    mowerSkinRing.scale.set(ringScale, ringScale, 1);
+    mowerSkinRing.rotation.z += deltaSec * fx.ringSpin;
+    if (mowerSkinRingMaterial) {
+      mowerSkinRingMaterial.opacity = fx.ringOpacity + pulse01 * 0.08;
+    }
+  }
+  if (!mowerSkinTrailLine || !mowerSkinTrailLine.visible || !mowerIsMoving) return;
+  const step = Math.max(0.16, Number(fx.trailStep) || 0.24);
+  const pos = new THREE.Vector3(mower.position.x, 0.06, mower.position.z);
+  if (!mowerSkinTrailInitialized) {
+    mowerSkinTrailPoints.push(pos);
+    mowerSkinTrailLastPos.copy(pos);
+    mowerSkinTrailInitialized = true;
+    mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+    return;
+  }
+  const dx = pos.x - mowerSkinTrailLastPos.x;
+  const dz = pos.z - mowerSkinTrailLastPos.z;
+  if (dx * dx + dz * dz < step * step) return;
+  mowerSkinTrailPoints.push(pos);
+  mowerSkinTrailLastPos.copy(pos);
+  if (mowerSkinTrailPoints.length > MOWER_SKIN_TRAIL_MAX_POINTS) {
+    mowerSkinTrailPoints.splice(
+      0,
+      mowerSkinTrailPoints.length - MOWER_SKIN_TRAIL_MAX_POINTS,
+    );
+  }
+  mowerSkinTrailLine.geometry.setFromPoints(mowerSkinTrailPoints);
+}
+
 function animate(nowPerf = performance.now()) {
   requestAnimationFrame(animate);
   const frameDeltaMs = Math.max(0, Math.min(250, nowPerf - lastFrameTime));
@@ -3084,9 +3217,72 @@ function animate(nowPerf = performance.now()) {
   frameAccumulatorMs %= FRAME_INTERVAL_MS;
 
   const deltaSec = FRAME_INTERVAL_MS / 1000;
+
+  // Theme Logic (Hellcars & Cannon)
+  if (huidigeMapId === "HELL") {
+    if (keys['l']) cannonYaw += 2.5 * deltaSec;
+    if (keys['m']) cannonYaw -= 2.5 * deltaSec;
+    if (mowerCannon) mowerCannon.rotation.y = cannonYaw;
+    if (keys['p'] && Date.now() - lastShotTime > 500) {
+      window.shootCannon();
+      lastShotTime = Date.now();
+    }
+    // Update Hellcars
+    const target = mower.position;
+    for (let i = activeThemeEntities.length - 1; i >= 0; i--) {
+      const ent = activeThemeEntities[i];
+      if (ent.type === 'hellcar') {
+        const distanceToPlayer = ent.mesh.position.distanceTo(target);
+        if (distanceToPlayer < 1.8) {
+          // Schade aan speler: verlies geld en vernietig de auto.
+          geld = Math.max(0, geld - 100);
+          uiDirty = true;
+          window.triggerDamageFlash();
+          playerHealth -= 20;
+
+          if (playerHealth <= 0) {
+            huidigeMapId = "CLASSIC";
+            window.applyMapTheme();
+            window.save(true);
+            const naam = getChatDisplayName();
+            window.sendChatMessage(`${naam} is verloren in HELL`);
+            alert("Je bent bezweken in de HEL! Terug naar CLASSIC.");
+          }
+
+          themeObjectsGroup.remove(ent.mesh);
+          activeThemeEntities.splice(i, 1);
+          continue; // Ga naar de volgende entiteit
+        }
+
+        const dir = new THREE.Vector3().subVectors(target, ent.mesh.position).normalize();
+        ent.mesh.position.addScaledVector(dir, ent.speed * deltaSec);
+        ent.mesh.lookAt(target);
+      }
+    }
+    // Update Projectiles
+    for (let i = activeProjectiles.length - 1; i >= 0; i--) {
+      const p = activeProjectiles[i];
+      p.mesh.position.addScaledVector(p.velocity, deltaSec);
+      p.life -= deltaSec;
+      let hit = false;
+      for (let j = activeThemeEntities.length - 1; j >= 0; j--) {
+        const ent = activeThemeEntities[j];
+        if (ent.type === 'hellcar' && p.mesh.position.distanceTo(ent.mesh.position) < 2.0) {
+          themeObjectsGroup.remove(ent.mesh);
+          activeThemeEntities.splice(j, 1);
+          hit = true;
+          break;
+        }
+      }
+      if (hit || p.life <= 0) {
+        themeObjectsGroup.remove(p.mesh);
+        activeProjectiles.splice(i, 1);
+      }
+    }
+  }
+
   const frameFactor = Math.min(3, deltaSec * 60);
-  let s =
-    (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
+  let s = (gameMode === "creative" ? creativeSpeed : huidigeSnelheid) * frameFactor;
   const turnSpeed = BASE_TURN_SPEED * frameFactor;
   const now = Date.now();
   totaalSpeeltijdSec += deltaSec;
@@ -3104,6 +3300,8 @@ function animate(nowPerf = performance.now()) {
   const rijdtVooruit = Boolean(keys["w"] || keys["z"] || keys["arrowup"]);
   const rijdtAchteruit = Boolean(keys["s"] || keys["arrowdown"]);
   const moveDir = (rijdtVooruit ? 1 : 0) + (rijdtAchteruit ? -1 : 0);
+  const prevPosX = mower.position.x;
+  const prevPosZ = mower.position.z;
   if (moveDir !== 0) {
     const yaw = stuurYaw;
     mower.position.x += Math.sin(yaw) * s * moveDir;
@@ -3114,6 +3312,9 @@ function animate(nowPerf = performance.now()) {
     mower.position.x = Math.max(-maxPos, Math.min(maxPos, mower.position.x));
     mower.position.z = Math.max(-maxPos, Math.min(maxPos, mower.position.z));
   }
+  const dxMove = mower.position.x - prevPosX;
+  const dzMove = mower.position.z - prevPosZ;
+  const mowerIsMoving = dxMove * dxMove + dzMove * dzMove > 0.0001;
   if (mowerBlueKit && mowerBlueKit.visible && mowerBlueRotors.length) {
     for (const rotor of mowerBlueRotors) rotor.rotation.z += 0.25 * frameFactor;
   }
@@ -3121,6 +3322,7 @@ function animate(nowPerf = performance.now()) {
     blueAuraPulse += deltaSec * 4.6;
     mowerBlueAuraLight.intensity = 1.05 + Math.sin(blueAuraPulse) * 0.2;
   }
+  updateMowerSkinFx(deltaSec, mowerIsMoving);
   updateFpsMeter();
   updateGroundTiles();
   const maaierRadiusSq = huidigMowerRadius * huidigMowerRadius;
@@ -3190,10 +3392,7 @@ function animate(nowPerf = performance.now()) {
   cameraSwayOffset.lerp(cameraSwayTarget, swayLerp);
   setWorldVectorFromLocalXZ(cameraOffsetWorld, CAMERA_OFFSET, yaw);
   setWorldVectorFromLocalXZ(cameraSwayWorld, cameraSwayOffset, yaw);
-  desiredCameraPos
-    .copy(mower.position)
-    .add(cameraOffsetWorld)
-    .add(cameraSwayWorld);
+  desiredCameraPos.copy(mower.position).add(cameraOffsetWorld).add(cameraSwayWorld);
   const camPosLerp = 1 - Math.exp(-CAMERA_POSITION_SMOOTHNESS * deltaSec);
   camera.position.lerp(desiredCameraPos, camPosLerp);
   cameraLookAhead
@@ -3214,7 +3413,7 @@ if (!isGeladen || !actieveOpdracht) window.genereerMissie(false);
 if (!isGeladen || !eventOpdracht) window.genereerMissie(true);
 window.initFirebase();
 
-setInterval(() => window.save(), 10000);
+setInterval(() => window.save(), 5000);
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
 window.applyMapTheme();
