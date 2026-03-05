@@ -1449,6 +1449,11 @@ window.openMiniGame = () => {
       window.cleanupMiniGame();
       return;
     }
+    if (keys["z"]) {
+      miniGameMarkerPos = 50;
+      window.stopMiniGame();
+      return;
+    }
     miniGameMarkerPos += miniGameMarkerRichting * 1.9;
     if (miniGameMarkerPos >= 100) {
       miniGameMarkerPos = 100;
