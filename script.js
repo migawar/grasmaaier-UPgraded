@@ -2254,24 +2254,36 @@ window.toggleGoogleLogin = async () => {
   }
 };
 
-window.save = async (silent = false) => {
-  const data = window.getSaveData();
-  let json = "";
+window.serializeSaveData = () => {
   try {
-    json = JSON.stringify(data);
+    const data = window.getSaveData();
+    return {
+      data,
+      json: JSON.stringify(data),
+    };
   } catch (err) {
     console.error("Save serialiseren mislukt:", err);
-    return;
+    return null;
   }
+};
 
-  // Sla altijd lokaal op (primair + backup).
+window.saveLocal = (serialized = null) => {
+  const payload = serialized ?? window.serializeSaveData();
+  if (!payload?.json) return false;
   try {
-    localStorage.setItem(LOCAL_SAVE_KEY, json);
-    localStorage.setItem(LOCAL_SAVE_BACKUP_KEY, json);
+    localStorage.setItem(LOCAL_SAVE_KEY, payload.json);
+    localStorage.setItem(LOCAL_SAVE_BACKUP_KEY, payload.json);
+    return true;
   } catch (err) {
     console.error("Lokale save mislukt:", err);
-    return;
+    return false;
   }
+};
+
+window.save = async (silent = false) => {
+  const serialized = window.serializeSaveData();
+  if (!serialized) return;
+  if (!window.saveLocal(serialized)) return;
 
   // Sla op in de cloud als de speler is ingelogd.
   if (ingelogdeGebruiker && firebaseDb) {
@@ -2279,7 +2291,7 @@ window.save = async (silent = false) => {
       await setDoc(
         getSaveDocRef(ingelogdeGebruiker.uid),
         {
-          ...data,
+          ...serialized.data,
           accountEmail: ingelogdeGebruiker.email ?? null,
           accountDisplayName: ingelogdeGebruiker.displayName ?? null,
           updatedAt: serverTimestamp(),
@@ -3559,10 +3571,12 @@ window.initFirebase();
 
 setInterval(() => {
   if (!autoSaveOnd) return;
-  window.save();
+  window.save().catch((err) => {
+    console.error("Auto-save fout:", err);
+  });
 }, 5000);
 window.addEventListener("beforeunload", () => {
-  window.save(true);
+  window.saveLocal();
 });
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
