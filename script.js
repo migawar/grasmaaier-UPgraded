@@ -958,7 +958,7 @@ ui.innerHTML = `
     <div id="upgradeMenu" style="position:absolute; top:50%; left:20px; transform:translateY(-50%); display:flex; flex-direction:column; gap:12px; pointer-events:auto;"></div>
     <button id="gpBtn" onclick="window.openGP()" style="position:absolute; bottom:25px; left:25px; background:linear-gradient(to bottom, #f1c40f, #f39c12); color:white; border:5px solid white; padding:25px 50px; border-radius:20px; font-size:32px; cursor:pointer; pointer-events:auto; font-family:Impact;">GRASSPASS</button>
     <div id="rightPanel" style="position:absolute; bottom:25px; right:25px; display:flex; flex-direction:column; gap:10px; align-items:flex-end; pointer-events:auto;">
-        <button id="saveGameBtn" onclick="window.manualSave()" style="background:#16a34a; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">SPEL OPSLAAN</button>
+        <button id="saveGameBtn" onclick="window.manualSave('hud')" style="background:#16a34a; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">SPEL OPSLAAN</button>
         <button onclick="window.openCheat()" style="background:#e74c3c; color:white; border:3px solid white; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:18px; font-family:Impact;">REDEEM CODE</button>
         <button id="eventBtn" onclick="window.openEvent()" style="background:#9b59b6; color:white; border:5px solid white; padding:20px 45px; border-radius:20px; font-size:24px; cursor:pointer; font-family:Impact;">EVENT</button>
     </div>
@@ -2045,9 +2045,20 @@ window.showSaveToast = (text = "GAME OPGESLAGEN...", color = "rgba(255,255,255,0
   t.style.opacity = 1;
   setTimeout(() => (t.style.opacity = 0), 1500);
 };
-window.manualSave = async () => {
+window.manualSave = async (source = "hud") => {
+  const settingsSaveStatus = document.getElementById("settingsSaveStatus");
+  const hudSaveBtn = document.getElementById("saveGameBtn");
+  const settingsSaveBtn = document.getElementById("manualSaveSettingsBtn");
+  const saveBtn = source === "settings" ? settingsSaveBtn || hudSaveBtn : hudSaveBtn;
+  if (saveBtn) {
+    saveBtn.textContent = "OPSLAAN...";
+    saveBtn.style.background = "#2563eb";
+  }
+  if (settingsSaveStatus) {
+    settingsSaveStatus.textContent = "Status: opslaan...";
+    settingsSaveStatus.style.color = "#93c5fd";
+  }
   const gelukt = await window.save(true);
-  const saveBtn = document.getElementById("saveGameBtn");
   if (gelukt) {
     if (saveBtn) {
       const tijd = new Date().toLocaleTimeString("nl-NL", {
@@ -2062,6 +2073,10 @@ window.manualSave = async () => {
         saveBtn.style.background = "#16a34a";
       }, 1800);
     }
+    if (settingsSaveStatus) {
+      settingsSaveStatus.textContent = "Status: opgeslagen";
+      settingsSaveStatus.style.color = "#86efac";
+    }
     window.showSaveToast("GAME OPGESLAGEN...");
   } else {
     if (saveBtn) {
@@ -2071,6 +2086,10 @@ window.manualSave = async () => {
         saveBtn.textContent = "SPEL OPSLAAN";
         saveBtn.style.background = "#16a34a";
       }, 1800);
+    }
+    if (settingsSaveStatus) {
+      settingsSaveStatus.textContent = "Status: opslaan mislukt";
+      settingsSaveStatus.style.color = "#fca5a5";
     }
     window.showSaveToast("OPSLAAN MISLUKT", "#f87171");
   }
@@ -2457,7 +2476,8 @@ window.openSettings = () => {
   overlay.innerHTML = `<div id="settingsPanel" style="background:#111; padding:60px; border:8px solid white; border-radius:30px; text-align:center; max-width:92vw; max-height:85vh; overflow-y:auto; overflow-x:hidden;">
         <h1 style="font-size:60px; margin-bottom:30px;">INSTELLINGEN</h1>
         <button onclick="window.toggleAutoSave()" style="width:400px; padding:20px; background:${autoSaveOnd ? "#2ecc71" : "#e74c3c"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}</button><br>
-        <button onclick="window.manualSave()" style="width:400px; padding:16px; background:#16a34a; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:10px;">SPEL NU OPSLAAN</button><br>
+        <button id="manualSaveSettingsBtn" onclick="window.manualSave('settings')" style="width:400px; padding:16px; background:#16a34a; color:white; font-family:Impact; font-size:24px; cursor:pointer; border:3px solid white; border-radius:15px; margin-bottom:6px;">SPEL NU OPSLAAN</button><br>
+        <div id="settingsSaveStatus" style="width:400px; margin:0 auto 10px; color:#9ca3af; font-size:18px;">Status: wacht op handmatig opslaan</div>
         <button onclick="window.toggleGameMode()" style="width:400px; padding:20px; background:${gameMode === "creative" ? "#f1c40f" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">MODE: ${gameMode.toUpperCase()}</button><br>
         <button onclick="window.toggleOneindigSpeelveld()" style="width:400px; padding:20px; background:${oneindigSpeelveldOnd ? "#2ecc71" : "#444"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ONEINDIG SPEELVELD: ${oneindigSpeelveldOnd ? "AAN" : "UIT"}</button><br>
         <button onclick="window.toggleLichtKleur()" style="width:400px; padding:20px; background:${lichtKleur === "hemelsblauw" ? "#87ceeb" : "#333"}; color:white; font-family:Impact; font-size:25px; cursor:pointer; border:none; border-radius:15px; margin-bottom:10px;">ACHTERGROND: ${lichtKleur === "hemelsblauw" ? "HEMELSBLAUW" : "STANDAARD"}</button><br>
