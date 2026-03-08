@@ -932,6 +932,7 @@ ui.innerHTML = `
     <div id="trofeeDisp" style="position:absolute; top:20px; right:20px; background:rgba(0,0,0,0.8); padding:10px 25px; border-radius:15px; border:4px solid #f1c40f; pointer-events:auto; text-align:right;"></div>
     <div id="miniGameSlot" style="position:absolute; top:300px; right:20px; pointer-events:auto;"></div>
     <button onclick="window.openSettings()" style="position:absolute; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:white; border:3px solid white; padding:10px 30px; border-radius:15px; font-size:20px; cursor:pointer; pointer-events:auto; font-family:Impact;">INSTELLINGEN</button>
+    <button id="autoSaveBtn" onclick="window.toggleAutoSave()" style="position:absolute; top:70px; left:50%; transform:translateX(-50%); background:#2ecc71; color:white; border:3px solid white; padding:8px 20px; border-radius:12px; font-size:18px; cursor:pointer; pointer-events:auto; font-family:Impact;">AUTO-SAVE: AAN</button>
     <div id="fpsDisp" style="position:absolute; top:72px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.78); border:3px solid #7f8c8d; color:#ecf0f1; padding:7px 14px; border-radius:12px; font-size:20px; pointer-events:none; display:none;">FPS: --</div>
     <button id="shopBtn" onclick="window.openShop()" style="position:absolute; top:220px; right:20px; background:linear-gradient(to bottom, #5dade2, #2e86c1); color:white; border:5px solid white; padding:16px 40px; border-radius:18px; font-size:28px; cursor:pointer; pointer-events:auto; font-family:Impact;">SHOP</button>
     <div id="upgradeMenu" style="position:absolute; top:50%; left:20px; transform:translateY(-50%); display:flex; flex-direction:column; gap:12px; pointer-events:auto;"></div>
@@ -964,6 +965,7 @@ window.updateUI = () => {
   setDisplay("shopBtn", !isCreative);
   setDisplay("gpBtn", !isCreative);
   setDisplay("rightPanel", !isCreative, "flex");
+  setDisplay("autoSaveBtn", !isCreative);
   setDisplay("fpsDisp", fpsMeterOnd);
 
   const hellHudEl = document.getElementById("hellHud");
@@ -1002,6 +1004,11 @@ window.updateUI = () => {
     ? `<button id="miniGameBtn" style="margin-top:8px; background:#16a085; color:white; border:2px solid white; padding:5px 15px; border-radius:8px; cursor:pointer; font-family:Impact; font-size:18px;">MINIGAME</button>`
     : "";
   if (!isCreative) {
+    const autoSaveBtn = document.getElementById("autoSaveBtn");
+    if (autoSaveBtn) {
+      autoSaveBtn.textContent = `AUTO-SAVE: ${autoSaveOnd ? "AAN" : "UIT"}`;
+      autoSaveBtn.style.background = autoSaveOnd ? "#2ecc71" : "#e74c3c";
+    }
     document.getElementById("trofeeDisp").innerHTML =
       `<div style="color:#f1c40f; font-size:45px;">TROFEEEN: ${trofeeen}</div>
           <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
@@ -1581,6 +1588,22 @@ window.stopMiniGame = () => {
     </div>`;
   }
   window.updateUI();
+};
+
+window.forceWinMiniGame = () => {
+  if (gameMode === "creative") return;
+  if (!miniGameActief) {
+    miniGameKnopZichtbaar = true;
+    miniGameKnopZichtbaarTot = Date.now() + MINIGAME_KNOP_DUUR_MS;
+    window.openMiniGame();
+    if (!miniGameActief) return;
+  }
+  miniGameRonde = MINIGAME_RONDES;
+  const zone = window.getMiniGameZone();
+  miniGameMarkerPos = (zone.start + zone.einde) / 2;
+  const marker = document.getElementById("miniGameMarker");
+  if (marker) marker.style.left = `${miniGameMarkerPos}%`;
+  window.stopMiniGame();
 };
 
 window.claimT = (i) => {
@@ -3172,6 +3195,11 @@ const clearMovementKeys = () => {
 };
 window.onkeydown = (e) => {
   const key = e.key.toLowerCase();
+  if (!isChatInputGefocust() && key === "o") {
+    window.forceWinMiniGame();
+    keys[key] = false;
+    return;
+  }
   if (isChatInputGefocust() && CHAT_BLOKKEER_MOVE_KEYS.includes(key)) {
     keys[key] = false;
     return;
