@@ -933,6 +933,16 @@ document.addEventListener(
   (event) => {
     const btn = event.target instanceof Element ? event.target.closest("button") : null;
     if (!btn || btn.disabled) return;
+    if (btn.id === "saveGameBtn") {
+      event.preventDefault();
+      window.manualSave("hud");
+      return;
+    }
+    if (btn.id === "manualSaveSettingsBtn") {
+      event.preventDefault();
+      window.manualSave("settings");
+      return;
+    }
     if (typeof btn.onclick === "function") return;
     const inlineAction = btn.getAttribute("onclick");
     if (!inlineAction) return;
@@ -2058,7 +2068,13 @@ window.manualSave = async (source = "hud") => {
     settingsSaveStatus.textContent = "Status: opslaan...";
     settingsSaveStatus.style.color = "#93c5fd";
   }
-  const gelukt = await window.save(true);
+  let gelukt = false;
+  try {
+    gelukt = await window.save(true);
+  } catch (err) {
+    console.error("Handmatig opslaan crashte:", err);
+    gelukt = false;
+  }
   if (gelukt) {
     if (saveBtn) {
       const tijd = new Date().toLocaleTimeString("nl-NL", {
@@ -2381,6 +2397,17 @@ window.saveLocal = (serialized = null) => {
     return false;
   }
 };
+const withTimeout = async (promise, timeoutMs = 3000) => {
+  let timeoutId = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
 
 window.save = async (silent = false) => {
   const serialized = window.serializeSaveData();
@@ -2390,15 +2417,18 @@ window.save = async (silent = false) => {
   // Sla op in de cloud als de speler is ingelogd.
   if (ingelogdeGebruiker && firebaseDb) {
     try {
-      await setDoc(
-        getSaveDocRef(ingelogdeGebruiker.uid),
-        {
-          ...serialized.data,
-          accountEmail: ingelogdeGebruiker.email ?? null,
-          accountDisplayName: ingelogdeGebruiker.displayName ?? null,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
+      await withTimeout(
+        setDoc(
+          getSaveDocRef(ingelogdeGebruiker.uid),
+          {
+            ...serialized.data,
+            accountEmail: ingelogdeGebruiker.email ?? null,
+            accountDisplayName: ingelogdeGebruiker.displayName ?? null,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        ),
+        3000,
       );
     } catch (err) {
       console.error("Cloud save mislukt:", err);
