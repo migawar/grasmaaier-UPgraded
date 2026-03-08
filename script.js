@@ -3609,4 +3609,4 @@ window.addEventListener("beforeunload", () => {
 window.updateUI();
 window.applySkinVisual(huidigeSkin);
 window.applyMapTheme();
-animate();
+animate();//Z
