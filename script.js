@@ -2037,8 +2037,21 @@ window.toggleAutoSave = () => {
   if (autoSaveOnd) window.save(true);
   window.openSettings();
 };
+window.showSaveToast = (text = "GAME OPGESLAGEN...", color = "rgba(255,255,255,0.5)") => {
+  const t = document.getElementById("saveToast");
+  if (!t) return;
+  t.textContent = text;
+  t.style.color = color;
+  t.style.opacity = 1;
+  setTimeout(() => (t.style.opacity = 0), 1500);
+};
 window.manualSave = async () => {
-  await window.save(false);
+  const gelukt = await window.save(true);
+  if (gelukt) {
+    window.showSaveToast("GAME OPGESLAGEN...");
+  } else {
+    window.showSaveToast("OPSLAAN MISLUKT", "#f87171");
+  }
 };
 window.claimDagelijksCadeau = async () => {
   if (!kanDagelijksCadeauClaimen()) {
@@ -2330,8 +2343,8 @@ window.saveLocal = (serialized = null) => {
 
 window.save = async (silent = false) => {
   const serialized = window.serializeSaveData();
-  if (!serialized) return;
-  if (!window.saveLocal(serialized)) return;
+  if (!serialized) return false;
+  if (!window.saveLocal(serialized)) return false;
 
   // Sla op in de cloud als de speler is ingelogd.
   if (ingelogdeGebruiker && firebaseDb) {
@@ -2354,12 +2367,9 @@ window.save = async (silent = false) => {
   // Toon de "opgeslagen" toast alleen bij de periodieke auto-save,
   // niet bij de 'stille' saves die op de achtergrond gebeuren.
   if (autoSaveOnd && !silent) {
-    const t = document.getElementById("saveToast");
-    if (t) {
-      t.style.opacity = 1;
-      setTimeout(() => (t.style.opacity = 0), 1500);
-    }
+    window.showSaveToast("GAME OPGESLAGEN...");
   }
+  return true;
 };
 
 window.load = () => {
